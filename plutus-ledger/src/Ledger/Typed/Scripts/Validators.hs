@@ -12,7 +12,7 @@ module Ledger.Typed.Scripts.Validators
     , ValidatorType
     , WrappedValidatorType
     , wrapValidator
-    , TypedValidator
+    , TypedValidator(..)
     , mkTypedValidator
     , mkTypedValidatorParam
     , validatorHash
