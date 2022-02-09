@@ -18,7 +18,6 @@ module Plutus.PAB.Webserver.Server
     , startServerDebug'
     ) where
 
-import Cardano.Wallet.Mock.Types (WalletInfo (..))
 import Control.Concurrent (MVar, forkFinally, forkIO, newEmptyMVar, putMVar)
 import Control.Concurrent.Availability (Availability, available, newToken)
 import Control.Concurrent.STM qualified as STM
@@ -30,27 +29,27 @@ import Data.Aeson (FromJSON, ToJSON)
 import Data.Bifunctor (first)
 import Data.ByteString.Lazy.Char8 qualified as LBS
 import Data.Function ((&))
-import Data.Monoid (Endo (..))
+import Data.Monoid (Endo (Endo, appEndo))
 import Data.OpenApi.Schema qualified as OpenApi
 import Data.Proxy (Proxy (Proxy))
 import Network.Wai (Middleware)
 import Network.Wai.Handler.Warp qualified as Warp
 import Network.Wai.Middleware.Cors qualified as Cors
 import Network.Wai.Middleware.Servant.Options qualified as Cors
-import Plutus.PAB.Core (PABAction, PABRunner (..))
+import Plutus.PAB.Core (PABAction, PABRunner (PABRunner, runPABAction))
 import Plutus.PAB.Core qualified as Core
 import Plutus.PAB.Effects.Contract qualified as Contract
 import Plutus.PAB.Monitoring.PABLogMsg qualified as LM
 import Plutus.PAB.Simulator (Simulation)
-import Plutus.PAB.Simulator qualified as Simulator
-import Plutus.PAB.Types (PABError, WebserverConfig (..), baseUrl, defaultWebServerConfig)
-import Plutus.PAB.Webserver.API (API, SwaggerAPI, WSAPI, WalletProxy)
-import Plutus.PAB.Webserver.Handler (apiHandler, swagger, walletProxy, walletProxyClientEnv)
+import Plutus.PAB.Types (PABError, WebserverConfig (WebserverConfig, endpointTimeout, permissiveCorsPolicy, staticDir),
+                         baseUrl, defaultWebServerConfig)
+import Plutus.PAB.Webserver.API (API, SwaggerAPI, WSAPI)
+import Plutus.PAB.Webserver.Handler (apiHandler, swagger)
 import Plutus.PAB.Webserver.WebSocket qualified as WS
 import Servant (Application, Handler (Handler), Raw, ServerT, err500, errBody, hoistServer, serve,
                 serveDirectoryFileServer, (:<|>) ((:<|>)))
 import Servant qualified
-import Servant.Client (BaseUrl (baseUrlPort), ClientEnv)
+import Servant.Client (BaseUrl (baseUrlPort))
 import Wallet.Emulator.Wallet (WalletId)
 
 asHandler :: forall t env a. PABRunner t env -> PABAction t env a -> Handler a
@@ -73,38 +72,24 @@ app ::
     , OpenApi.ToSchema (Contract.ContractDef t)
     ) =>
     Maybe FilePath
-    -> Either ClientEnv (PABAction t env WalletInfo) -- ^ wallet client (if wallet proxy is enabled)
     -> PABRunner t env
     -> Application
-app fp walletClient pabRunner = do
+app fp pabRunner = do
     let apiServer :: ServerT (CombinedAPI t) Handler
         apiServer =
-            (Servant.hoistServer
+            Servant.hoistServer
                 (Proxy @(BaseCombinedAPI t))
                 (asHandler pabRunner)
-                (apiHandler :<|> WS.wsHandler)) :<|> (swagger @t)
+                (apiHandler :<|> WS.wsHandler) :<|> (swagger @t)
 
     case fp of
         Nothing -> do
-            let wp = either walletProxyClientEnv walletProxy walletClient
-                rest = Proxy @(CombinedAPI t :<|> (WalletProxy WalletId))
-                wpServer =
-                    Servant.hoistServer
-                        (Proxy @(WalletProxy WalletId))
-                        (asHandler pabRunner)
-                        wp
-            Servant.serve rest (apiServer :<|> wpServer)
+            Servant.serve (Proxy @(CombinedAPI t)) apiServer
         Just filePath -> do
-            let wp = either walletProxyClientEnv walletProxy walletClient
-                wpServer =
-                    Servant.hoistServer
-                        (Proxy @(WalletProxy WalletId))
-                        (asHandler pabRunner)
-                        wp
+            let
                 fileServer :: ServerT Raw Handler
                 fileServer = serveDirectoryFileServer filePath
-                rest = Proxy @(CombinedAPI t :<|> (WalletProxy WalletId) :<|> Raw)
-            Servant.serve rest (apiServer :<|> wpServer :<|> fileServer)
+            Servant.serve (Proxy @(CombinedAPI t :<|> Raw)) (apiServer :<|> fileServer)
 
 -- | Start the server using the config. Returns an action that shuts it down
 --   again, and an MVar that is filled when the webserver
@@ -118,13 +103,12 @@ startServer ::
     , OpenApi.ToSchema (Contract.ContractDef t)
     )
     => WebserverConfig -- ^ Optional file path for static assets
-    -> Either ClientEnv (PABAction t env WalletInfo)
     -> Availability
     -> PABAction t env (MVar (), PABAction t env ())
-startServer WebserverConfig{baseUrl, staticDir, permissiveCorsPolicy, endpointTimeout} walletClient availability = do
+startServer WebserverConfig{baseUrl, staticDir, permissiveCorsPolicy, endpointTimeout} availability = do
     when permissiveCorsPolicy $
       logWarn @(LM.PABMultiAgentMsg t) (LM.UserLog "Warning: Using a very permissive CORS policy! *Any* website serving JavaScript can interact with these endpoints.")
-    startServer' middlewares (baseUrlPort baseUrl) walletClient staticDir availability (timeout endpointTimeout)
+    startServer' middlewares (baseUrlPort baseUrl) staticDir availability (timeout endpointTimeout)
       where
         middlewares = if permissiveCorsPolicy then corsMiddlewares else []
         corsMiddlewares =
@@ -153,12 +137,11 @@ startServer' ::
     )
     => [Middleware] -- ^ Optional wai middleware
     -> Int -- ^ Port
-    -> Either ClientEnv (PABAction t env WalletInfo) -- ^ How to generate a new wallet, either by proxying the request to the wallet API, or by running the PAB action
     -> Maybe FilePath -- ^ Optional file path for static assets
     -> Availability
     -> Int
     -> PABAction t env (MVar (), PABAction t env ())
-startServer' waiMiddlewares port walletClient staticPath availability timeout = do
+startServer' waiMiddlewares port staticPath availability timeout = do
     simRunner <- Core.pabRunner
     shutdownVar <- liftIO $ STM.atomically $ STM.newEmptyTMVar @()
     mvar <- liftIO newEmptyMVar
@@ -180,7 +163,7 @@ startServer' waiMiddlewares port walletClient staticPath availability timeout = 
     void $ liftIO $
         forkFinally
             (Warp.runSettings warpSettings $ middleware
-               $ app staticPath walletClient simRunner)
+               $ app staticPath simRunner)
             (\_ -> putMVar mvar ())
 
     pure (mvar, liftIO $ STM.atomically $ STM.putTMVar shutdownVar ())
@@ -209,7 +192,4 @@ startServerDebug' ::
     -> Simulation t (Simulation t ())
 startServerDebug' conf = do
     tk <- newToken
-    let mkWalletInfo = do
-            (wllt, pk) <- Simulator.addWallet
-            pure $ WalletInfo{wiWallet = wllt, wiPubKeyHash = pk}
-    snd <$> startServer conf (Right mkWalletInfo) tk
+    snd <$> startServer conf tk

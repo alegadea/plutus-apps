@@ -33,12 +33,12 @@ import Test.Tasty.Golden (goldenVsString)
 import Test.Tasty.HUnit qualified as HUnit
 import Test.Tasty.QuickCheck hiding ((.&&.))
 
-import Ledger (Value, minAdaTxOut)
+import Ledger (Value)
+import Ledger qualified
 import Ledger.Ada qualified as Ada
 import Ledger.Slot (Slot (..))
 import Ledger.Time (POSIXTime)
 import Ledger.TimeSlot qualified as TimeSlot
-import Ledger.Value (leq)
 import Plutus.Contract hiding (currentSlot, runError)
 import Plutus.Contract.Test
 import Plutus.Contract.Test.ContractModel
@@ -201,6 +201,9 @@ instance ContractModel CrowdfundingModel where
                                    , _endSlot             = TimeSlot.posixTimeToEnclosingSlot def $ campaignDeadline params
                                    }
 
+  initialHandleSpecs = ContractInstanceSpec (OwnerKey w1) w1 (crowdfunding params) :
+                       [ ContractInstanceSpec (ContributorKey w) w (crowdfunding params) | w <- contributorWallets ]
+
   perform h s a = case a of
     CWaitUntil slot -> void $ Trace.waitUntilSlot slot
     CContribute w v -> Trace.callEndpoint @"contribute" (h $ ContributorKey w) Contribution{contribValue=v}
@@ -238,10 +241,21 @@ instance ContractModel CrowdfundingModel where
   -- The 'precondition' says when a particular command is allowed.
   precondition s cmd = case cmd of
     CWaitUntil slot -> slot > s ^. currentSlot
-    CContribute w v -> w `notElem` Map.keys (s ^. contractState . contributions)
-                    && w /= (s ^. contractState . ownerWallet)
-                    && s ^. currentSlot < s ^. contractState . endSlot
-                    && Ada.toValue Ledger.minAdaTxOut `leq` v
+    -- In order to contribute, we need to satisfy the constraint where each tx
+    -- output must have at least N Ada.
+    --
+    -- We must make sure that we don't contribute a too high value such that:
+    --   - we can't pay for fees anymore
+    --   - have a tx output of less than N Ada.
+    --
+    -- We suppose the initial balance is 100 Ada. Needs to be changed if
+    -- the emulator initialises the wallets with a different value.
+    CContribute w v -> let currentWalletBalance = Ada.adaOf 100 + Ada.fromValue (s ^. balanceChange w)
+                        in w `notElem` Map.keys (s ^. contractState . contributions)
+                        && w /= (s ^. contractState . ownerWallet)
+                        && s ^. currentSlot < s ^. contractState . endSlot
+                        && Ada.fromValue v >= Ledger.minAdaTxOut
+                        && (currentWalletBalance - Ada.fromValue v) >= (Ledger.minAdaTxOut <> Ledger.maxFee)
     CStart          -> Prelude.not (s ^. contractState . ownerOnline || s ^. contractState . ownerContractDone)
 
   -- To generate a random test case we need to know how to generate a random
@@ -269,9 +283,5 @@ instance ContractModel CrowdfundingModel where
 contributorWallets :: [Wallet]
 contributorWallets = [w2, w3, w4, w5, w6, w7, w8, w9, w10]
 
-handleSpecs :: [ContractInstanceSpec CrowdfundingModel]
-handleSpecs = ContractInstanceSpec (OwnerKey w1) w1 (crowdfunding params) :
-            [ ContractInstanceSpec (ContributorKey w) w (crowdfunding params) | w <- contributorWallets ]
-
 prop_Crowdfunding :: Actions CrowdfundingModel -> Property
-prop_Crowdfunding = propRunActions_ handleSpecs
+prop_Crowdfunding = propRunActions_

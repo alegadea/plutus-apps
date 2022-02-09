@@ -16,6 +16,8 @@ module Plutus.ChainIndex.Effects(
     , utxoSetMembership
     , utxoSetAtAddress
     , utxoSetWithCurrency
+    , txsFromTxIds
+    , txoSetAtAddress
     , getTip
     -- * Control effect
     , ChainIndexControlEffect(..)
@@ -26,14 +28,15 @@ module Plutus.ChainIndex.Effects(
     , getDiagnostics
     ) where
 
-import Control.Monad.Freer.Extras.Pagination (Page, PageQuery)
+import Control.Monad.Freer.Extras.Pagination (PageQuery)
 import Control.Monad.Freer.TH (makeEffect)
 import Ledger (AssetClass, Datum, DatumHash, MintingPolicy, MintingPolicyHash, Redeemer, RedeemerHash, StakeValidator,
                StakeValidatorHash, TxId, Validator, ValidatorHash)
 import Ledger.Credential (Credential)
 import Ledger.Tx (ChainIndexTxOut, TxOutRef)
+import Plutus.ChainIndex.Api (IsUtxoResponse, TxosResponse, UtxosResponse)
 import Plutus.ChainIndex.Tx (ChainIndexTx)
-import Plutus.ChainIndex.Types (BlockProcessOption, Diagnostics, Point, Tip)
+import Plutus.ChainIndex.Types (ChainSyncBlock, Diagnostics, Point, Tip)
 
 data ChainIndexQueryEffect r where
 
@@ -59,16 +62,22 @@ data ChainIndexQueryEffect r where
     TxFromTxId :: TxId -> ChainIndexQueryEffect (Maybe ChainIndexTx)
 
     -- | Whether a tx output is part of the UTXO set
-    UtxoSetMembership :: TxOutRef -> ChainIndexQueryEffect (Tip, Bool)
+    UtxoSetMembership :: TxOutRef -> ChainIndexQueryEffect IsUtxoResponse
 
     -- | Unspent outputs located at addresses with the given credential.
-    UtxoSetAtAddress :: PageQuery TxOutRef -> Credential -> ChainIndexQueryEffect (Tip, Page TxOutRef)
+    UtxoSetAtAddress :: PageQuery TxOutRef -> Credential -> ChainIndexQueryEffect UtxosResponse
 
     -- | Unspent outputs containing a specific currency ('AssetClass').
     --
     -- Note that requesting unspent outputs containing Ada should not return
     -- anything, as this request will always return all unspent outputs.
-    UtxoSetWithCurrency :: PageQuery TxOutRef -> AssetClass -> ChainIndexQueryEffect (Tip, Page TxOutRef)
+    UtxoSetWithCurrency :: PageQuery TxOutRef -> AssetClass -> ChainIndexQueryEffect UtxosResponse
+
+    -- | Get the transactions for a list of tx IDs.
+    TxsFromTxIds :: [TxId] -> ChainIndexQueryEffect [ChainIndexTx]
+
+    -- | Outputs located at addresses with the given credential.
+    TxoSetAtAddress :: PageQuery TxOutRef -> Credential -> ChainIndexQueryEffect TxosResponse
 
     -- | Get the tip of the chain index
     GetTip :: ChainIndexQueryEffect Tip
@@ -78,7 +87,7 @@ makeEffect ''ChainIndexQueryEffect
 data ChainIndexControlEffect r where
 
     -- | Add a new block to the chain index by giving a new tip and list of tx.
-    AppendBlock :: Tip -> [ChainIndexTx] -> BlockProcessOption -> ChainIndexControlEffect ()
+    AppendBlock :: ChainSyncBlock -> ChainIndexControlEffect ()
 
     -- | Roll back to a previous state (previous tip)
     Rollback    :: Point -> ChainIndexControlEffect ()

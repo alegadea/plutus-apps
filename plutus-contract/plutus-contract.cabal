@@ -1,4 +1,4 @@
-cabal-version: 2.2
+cabal-version: 3.0
 name: plutus-contract
 version: 0.1.0.0
 license: Apache-2.0
@@ -15,12 +15,12 @@ build-type: Simple
 
 source-repository head
     type: git
-    location: https://github.com/iohk/plutus
+    location: https://github.com/input-output-hk/plutus-apps
 
 common lang
     default-language: Haskell2010
-    default-extensions: ExplicitForAll ScopedTypeVariables
-                        DeriveGeneric StandaloneDeriving DeriveLift
+    default-extensions: ExplicitForAll ScopedTypeVariables MultiParamTypeClasses
+                        DeriveGeneric StandaloneDeriving DeriveLift FlexibleContexts
                         GeneralizedNewtypeDeriving DeriveFunctor DeriveFoldable
                         DeriveTraversable ImportQualifiedPost
     ghc-options: -Wall -Wnoncanonical-monad-instances -Wunused-packages
@@ -46,6 +46,8 @@ library
         Plutus.Contract.Request
         Plutus.Contract.Checkpoint
         Plutus.Contract.Constraints
+        Plutus.Contract.Logging
+        Plutus.Contract.Oracle
         Plutus.Contract.State
         Plutus.Contract.Schema
         Plutus.Contract.Trace
@@ -77,6 +79,7 @@ library
         Wallet
         Wallet.API
         Wallet.Effects
+        Wallet.Error
         Wallet.Graph
         Wallet.Types
         Plutus.Trace
@@ -101,6 +104,7 @@ library
         plutus-core -any,
         plutus-ledger -any,
         plutus-ledger-api -any,
+        plutus-ledger-constraints -any,
         plutus-tx -any,
         freer-extras -any
     build-depends:
@@ -154,7 +158,10 @@ library
     if !(impl(ghcjs) || os(ghcjs) || os(windows))
         exposed-modules:
             Plutus.Contract.Test
+            Plutus.Contract.Test.Coverage
             Plutus.Contract.Test.ContractModel
+            Plutus.Contract.Test.ContractModel.Internal
+            Plutus.Contract.Test.ContractModel.CrashTolerance
         build-depends:
             tasty -any,
             tasty-hunit -any,
@@ -181,10 +188,13 @@ test-suite plutus-contract-test
         Spec.State
         Spec.ThreadToken
         Spec.Secrets
+        Spec.Plutus.Contract.Wallet
+        Spec.Plutus.Contract.Oracle
     build-depends:
         base >=4.9 && <5,
         bytestring -any,
         cardano-api -any,
+        cardano-api:gen -any,
         containers -any,
         data-default -any,
         freer-extras -any,
@@ -203,6 +213,7 @@ test-suite plutus-contract-test
         plutus-chain-index-core -any,
         plutus-contract -any,
         plutus-ledger -any,
+        plutus-ledger-constraints -any,
         plutus-tx -any,
         plutus-ledger-api -any,
         freer-simple -any,

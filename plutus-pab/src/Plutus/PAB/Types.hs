@@ -12,11 +12,11 @@
 module Plutus.PAB.Types where
 
 import Cardano.ChainIndex.Types qualified as ChainIndex
-import Cardano.Node.Types (MockServerConfig (..))
-import Cardano.Wallet.Mock.Types qualified as Wallet
+import Cardano.Node.Types (PABServerConfig)
+import Cardano.Wallet.Types qualified as Wallet
 import Control.Lens.TH (makePrisms)
 import Control.Monad.Freer.Extras.Beam (BeamError)
-import Data.Aeson (FromJSON, ToJSON (..))
+import Data.Aeson (FromJSON, ToJSON)
 import Data.Default (Default, def)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -26,14 +26,16 @@ import Data.UUID (UUID)
 import Data.UUID.Extras qualified as UUID
 import GHC.Generics (Generic)
 import Ledger (Block, Blockchain, Tx, TxId, eitherTx, txId)
-import Ledger.Index as UtxoIndex
+import Ledger.Index (UtxoIndex (UtxoIndex))
+import Ledger.Index qualified as UtxoIndex
+import Plutus.ChainIndex.Types (Point (..))
 import Plutus.Contract.Types (ContractError)
 import Plutus.PAB.Instances ()
 import Prettyprinter (Pretty, line, pretty, viaShow, (<+>))
-import Servant.Client (BaseUrl (..), ClientError, Scheme (Http))
+import Servant.Client (BaseUrl (BaseUrl), ClientError, Scheme (Http))
 import Wallet.API (WalletAPIError)
 import Wallet.Emulator.Wallet (Wallet)
-import Wallet.Types (ContractInstanceId (..), NotificationError)
+import Wallet.Types (ContractInstanceId (ContractInstanceId), NotificationError)
 
 data PABError
     = FileNotFound FilePath
@@ -56,6 +58,7 @@ data PABError
     | ContractStateNotFound ContractInstanceId
     | AesonDecodingError Text Text
     | MigrationNotDoneError Text
+    | RemoteWalletWithMockNodeError
     deriving stock (Show, Eq, Generic)
     deriving anyclass (ToJSON, FromJSON)
 
@@ -84,6 +87,7 @@ instance Pretty PABError where
                                    <> line
                                    <> "Did you forget to run the 'migrate' command ?"
                                    <+> "(ex. 'plutus-pab-migrate' or 'plutus-pab-examples --config <CONFIG_FILE> migrate')"
+        RemoteWalletWithMockNodeError   -> "The remote wallet can't be used with the mock node."
 
 data DbConfig =
     DbConfig
@@ -111,10 +115,11 @@ data Config =
     Config
         { dbConfig                :: DbConfig
         , walletServerConfig      :: Wallet.WalletConfig
-        , nodeServerConfig        :: MockServerConfig
+        , nodeServerConfig        :: PABServerConfig
         , pabWebserverConfig      :: WebserverConfig
         , chainIndexConfig        :: ChainIndex.ChainIndexConfig
         , requestProcessingConfig :: RequestProcessingConfig
+        , developmentOptions      :: DevelopmentOptions
         }
     deriving (Show, Eq, Generic, FromJSON)
 
@@ -127,6 +132,7 @@ defaultConfig =
     , pabWebserverConfig = def
     , chainIndexConfig = def
     , requestProcessingConfig = def
+    , developmentOptions = def
     }
 
 instance Default Config where
@@ -171,6 +177,24 @@ defaultWebServerConfig =
 
 instance Default WebserverConfig where
   def = defaultWebServerConfig
+
+data DevelopmentOptions =
+    DevelopmentOptions
+        { pabRollbackHistory :: Maybe Int
+        , pabResumeFrom      :: Point
+        }
+    deriving (Show, Eq, Generic)
+    deriving anyclass (FromJSON, ToJSON)
+
+defaultDevelopmentOptions :: DevelopmentOptions
+defaultDevelopmentOptions =
+    DevelopmentOptions
+        { pabRollbackHistory = Nothing
+        , pabResumeFrom      = PointAtGenesis
+        }
+
+instance Default DevelopmentOptions where
+    def = defaultDevelopmentOptions
 
 -- | The source of a PAB event, used for sharding of the event stream
 data Source

@@ -3,9 +3,29 @@
 , packages ? import ./. { inherit system enableHaskellProfiling; }
 }:
 let
-  inherit (packages) pkgs plutus-apps plutus-playground docs webCommon;
+  inherit (packages) pkgs plutus-apps plutus-playground pab-nami-demo docs webCommon;
   inherit (pkgs) stdenv lib utillinux python3 nixpkgs-fmt;
-  inherit (plutus-apps) haskell stylish-haskell sphinxcontrib-haddock sphinx-markdown-tables sphinxemoji nix-pre-commit-hooks cardano-cli cardano-node;
+  inherit (plutus-apps) haskell stylish-haskell sphinxcontrib-haddock sphinx-markdown-tables sphinxemoji nix-pre-commit-hooks;
+
+  # Feed cardano-wallet, cardano-cli & cardano-node to our shell.
+  # This is stable as it doesn't mix dependencies with this code-base;
+  # the fetched binaries are the "standard" builds that people test.
+  # This should be fast as it mostly fetches Hydra caches without building much.
+  cardano-wallet = import
+    (pkgs.fetchgit {
+      url = "https://github.com/input-output-hk/cardano-wallet";
+      rev = "2fdc9a5aa44d8bc8bed0da74151ea1016fc30508";
+      sha256 = "09zz1488as64l8w6kk1ijhs4y4rsi47ashsb3gbikq3fn22mc8xb";
+    })
+    { };
+  cardano-node = import
+    (pkgs.fetchgit {
+      url = "https://github.com/input-output-hk/cardano-node";
+      # A standard release compatible with the cardano-wallet commit above is always preferred.
+      rev = "1.33.0";
+      sha256 = "1hr00wqzmcyc3x0kp2hyw78rfmimf6z4zd4vv85b9zv3nqbjgrik";
+    })
+    { };
 
   # For Sphinx, and ad-hoc usage
   sphinxTools = python3.withPackages (ps: [
@@ -74,6 +94,9 @@ let
   # local build inputs ( -> ./nix/pkgs/default.nix )
   localInputs = (with plutus-apps; [
     cabal-install
+    cardano-node.cardano-cli
+    cardano-node.cardano-node
+    cardano-wallet.cardano-wallet
     cardano-repo-tool
     fixPngOptimization
     fixPurty
@@ -82,6 +105,8 @@ let
     haskell-language-server-wrapper
     hie-bios
     hlint
+    pab-nami-demo.generate-purescript
+    pab-nami-demo.start-backend
     plutus-playground.generate-purescript
     plutus-playground.start-backend
     psa

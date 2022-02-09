@@ -2,6 +2,7 @@
 {-# LANGUAGE DerivingVia       #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE Strict            #-}
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeApplications  #-}
 {-| Misc. types used in this package
@@ -32,7 +33,8 @@ module Plutus.ChainIndex.Types(
     , TxOutBalance(..)
     , tobUnspentOutputs
     , tobSpentOutputs
-    , BlockProcessOption(..)
+    , ChainSyncBlock(..)
+    , TxProcessOption(..)
     ) where
 
 import Codec.Serialise (Serialise)
@@ -44,24 +46,28 @@ import Data.Aeson (FromJSON, ToJSON)
 import Data.ByteArray qualified as BA
 import Data.ByteString.Lazy qualified as BSL
 import Data.Default (Default (..))
-import Data.Map (Map)
-import Data.Map qualified as Map
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Monoid (Last (..), Sum (..))
+import Data.OpenApi qualified as OpenApi
 import Data.Semigroup.Generic (GenericSemigroupMonoid (..))
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Word (Word64)
 import GHC.Generics (Generic)
 import Ledger (TxOutRef (..))
-import Ledger.Blockchain (Block, BlockId (..))
+import Ledger.Blockchain (BlockId (..))
+import Ledger.Blockchain qualified as Ledger
 import Ledger.Slot (Slot)
 import Ledger.TxId (TxId)
 import PlutusTx.Lattice (MeetSemiLattice (..))
 import Prettyprinter (Pretty (..), (<+>))
 import Prettyprinter.Extras (PrettyShow (..))
 
+import Plutus.ChainIndex.Tx (ChainIndexTx)
+
 -- | Compute a hash of the block's contents.
-blockId :: Block -> BlockId
+blockId :: Ledger.Block -> BlockId
 blockId = BlockId
         . BA.convert
         . hash @_ @SHA256
@@ -77,7 +83,7 @@ data Tip =
         , tipBlockNo :: BlockNumber -- ^ Last block number
         }
     deriving stock (Eq, Show, Generic)
-    deriving anyclass (ToJSON, FromJSON)
+    deriving anyclass (ToJSON, FromJSON, OpenApi.ToSchema)
 
 -- | When performing a rollback the chain sync protocol does not provide a block
 --   number where to resume from.
@@ -239,7 +245,7 @@ liftTxOutStatus = void
 
 newtype BlockNumber = BlockNumber { unBlockNumber :: Word64 }
     deriving stock (Eq, Ord, Show, Generic)
-    deriving newtype (Num, Real, Enum, Integral, Pretty, ToJSON, FromJSON)
+    deriving newtype (Num, Real, Enum, Integral, Pretty, ToJSON, FromJSON, OpenApi.ToSchema)
 
 data Diagnostics =
     Diagnostics
@@ -252,7 +258,7 @@ data Diagnostics =
         , someTransactions   :: [TxId]
         }
         deriving stock (Eq, Ord, Show, Generic)
-        deriving anyclass (ToJSON, FromJSON)
+        deriving anyclass (ToJSON, FromJSON, OpenApi.ToSchema)
 
 -- | Datatype returned when we couldn't get the state of a tx or a tx output.
 data TxStatusFailure
@@ -294,7 +300,11 @@ data TxConfirmedState =
     , validity       :: Last TxValidity
     }
     deriving stock (Eq, Generic, Show)
-    deriving (Semigroup, Monoid) via (GenericSemigroupMonoid TxConfirmedState)
+    deriving (Monoid) via (GenericSemigroupMonoid TxConfirmedState)
+
+instance Semigroup TxConfirmedState where
+    (TxConfirmedState tc ba v) <> (TxConfirmedState tc' ba' v') =
+        TxConfirmedState (tc <> tc') (ba <> ba') (v <> v')
 
 -- | The effect of a transaction (or a number of them) on the tx output set.
 data TxOutBalance =
@@ -332,7 +342,6 @@ data TxUtxoBalance =
         deriving stock (Eq, Show, Generic)
         deriving anyclass (FromJSON, ToJSON, Serialise)
 
-
 makeLenses ''TxUtxoBalance
 
 instance Semigroup TxUtxoBalance where
@@ -348,17 +357,23 @@ instance Monoid TxUtxoBalance where
     mappend = (<>)
     mempty = TxUtxoBalance mempty mempty
 
--- | User-customizable options to process a block.
+
+-- | User-customizable options to process a transaction.
 -- See #73 for more motivations.
-newtype BlockProcessOption =
-  BlockProcessOption
-    { bpoStoreTxs :: Bool
-    -- ^ Should the chain index store this batch of transactions or not.
-    -- If not, only handle the tip and UTXOs.
+newtype TxProcessOption = TxProcessOption
+    { tpoStoreTx :: Bool
+    -- ^ Should the chain index store this transaction or not.
+    -- If not, only handle the UTXOs.
     -- This, for example, allows applications to skip unwanted pre-Alonzo transactions.
     }
 
 -- We should think twice when setting the default option.
 -- For now, it should store all data to avoid weird non-backward-compatible bugs in the future.
-instance Default BlockProcessOption where
-  def = BlockProcessOption True
+instance Default TxProcessOption where
+    def = TxProcessOption { tpoStoreTx = True }
+
+-- | A block of transactions to be synced.
+data ChainSyncBlock = Block
+    { blockTip :: Tip
+    , blockTxs :: [(ChainIndexTx, TxProcessOption)]
+    }

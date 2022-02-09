@@ -5,7 +5,6 @@
 {-# LANGUAGE FlexibleContexts      #-}
 {-# LANGUAGE FlexibleInstances     #-}
 {-# LANGUAGE GADTs                 #-}
-{-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NamedFieldPuns        #-}
 {-# LANGUAGE OverloadedStrings     #-}
@@ -15,20 +14,21 @@
 {-# LANGUAGE StrictData            #-}
 {-# LANGUAGE TypeApplications      #-}
 
-module Plutus.PAB.Run.Cli (ConfigCommandArgs(..), runConfigCommand, runNoConfigCommand) where
+module Plutus.PAB.Run.Cli (ConfigCommandArgs(..), runConfigCommand) where
 
 -----------------------------------------------------------------------------------------------------------------------
 -- Command interpretation
 -----------------------------------------------------------------------------------------------------------------------
 
 import Cardano.BM.Configuration (Configuration)
-import Cardano.BM.Configuration.Model qualified as CM
 import Cardano.BM.Data.Trace (Trace)
 import Cardano.ChainIndex.Server qualified as ChainIndex
 import Cardano.Node.Server qualified as NodeServer
-import Cardano.Node.Types (MockServerConfig (..), NodeMode (..))
+import Cardano.Node.Types (NodeMode (AlonzoNode, MockNode),
+                           PABServerConfig (pscFeeConfig, pscNodeMode, pscSlotConfig, pscSocketPath))
 import Cardano.Wallet.Mock.Server qualified as WalletServer
-import Cardano.Wallet.Mock.Types
+import Cardano.Wallet.Mock.Types (WalletMsg)
+import Cardano.Wallet.Types (WalletConfig (LocalWalletConfig, RemoteWalletConfig))
 import Control.Concurrent (takeMVar)
 import Control.Concurrent.Async (Async, async, waitAny)
 import Control.Concurrent.Availability (Availability, available, starting)
@@ -46,46 +46,32 @@ import Data.Foldable (traverse_)
 import Data.Map qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.OpenApi.Schema qualified as OpenApi
-import Data.Proxy (Proxy (..))
+import Data.Proxy (Proxy (Proxy))
 import Data.Set qualified as Set
 import Data.Text.Extras (tshow)
 import Data.Time.Units (Second)
 import Plutus.Contract.Resumable (responses)
-import Plutus.Contract.State (State (..))
+import Plutus.Contract.State (State (State, record))
 import Plutus.Contract.State qualified as State
 import Plutus.PAB.App qualified as App
 import Plutus.PAB.Core qualified as Core
-import Plutus.PAB.Core.ContractInstance (ContractInstanceState (..), updateState)
+import Plutus.PAB.Core.ContractInstance (ContractInstanceState (ContractInstanceState), updateState)
 import Plutus.PAB.Core.ContractInstance.STM (InstanceState, emptyInstanceState)
 import Plutus.PAB.Db.Beam qualified as Beam
 import Plutus.PAB.Effects.Contract qualified as Contract
-import Plutus.PAB.Effects.Contract.Builtin (Builtin, BuiltinHandler, HasDefinitions (..), SomeBuiltinState (..),
-                                            getResponse)
+import Plutus.PAB.Effects.Contract.Builtin (Builtin, BuiltinHandler, HasDefinitions, SomeBuiltinState, getResponse)
 import Plutus.PAB.Monitoring.Monitoring qualified as LM
-import Plutus.PAB.Run.Command
-import Plutus.PAB.Run.PSGenerator (HasPSTypes (..))
-import Plutus.PAB.Run.PSGenerator qualified as PSGenerator
-import Plutus.PAB.Types (Config (..), chainIndexConfig, nodeServerConfig, walletServerConfig)
+import Plutus.PAB.Run.Command (ConfigCommand (ChainIndex, ContractState, ForkCommands, Migrate, MockWallet, PABWebserver, ReportActiveContracts, ReportAvailableContracts, ReportContractHistory, StartNode))
+import Plutus.PAB.Types (Config (Config, dbConfig, pabWebserverConfig), chainIndexConfig, nodeServerConfig,
+                         walletServerConfig)
 import Plutus.PAB.Webserver.Server qualified as PABServer
-import Plutus.PAB.Webserver.Types (ContractActivationArgs (..))
-import Prettyprinter (Pretty (..), defaultLayoutOptions, layoutPretty, pretty)
+import Plutus.PAB.Webserver.Types (ContractActivationArgs (ContractActivationArgs, caID, caWallet))
+import Prettyprinter (Pretty (pretty), defaultLayoutOptions, layoutPretty, pretty)
 import Prettyprinter.Render.Text (renderStrict)
 import Servant qualified
 import System.Exit (ExitCode (ExitFailure), exitWith)
 import Wallet.Emulator.Wallet qualified as Wallet
 import Wallet.Types qualified as Wallet
-
-runNoConfigCommand ::
-    NoConfigCommand
-    -> IO ()
-runNoConfigCommand = \case
-
-    -- Generate PureScript bridge code
-    PSGenerator {psGenOutputDir} -> do
-        PSGenerator.generateDefault psGenOutputDir
-
-    -- Get default logging configuration
-    WriteDefaultConfig{outputFile} -> LM.defaultConfig >>= flip CM.exportConfiguration outputFile
 
 data ConfigCommandArgs a =
     ConfigCommandArgs
@@ -106,7 +92,6 @@ runConfigCommand :: forall a.
     , Pretty a
     , Servant.MimeUnrender Servant.JSON a
     , HasDefinitions a
-    , HasPSTypes a
     , OpenApi.ToSchema a
     )
     => BuiltinHandler a
@@ -119,19 +104,23 @@ runConfigCommand _ ConfigCommandArgs{ccaTrace, ccaPABConfig=Config{dbConfig}} Mi
     App.migrate (toPABMsg ccaTrace) dbConfig
 
 -- Run mock wallet service
-runConfigCommand _ ConfigCommandArgs{ccaTrace, ccaPABConfig = Config {nodeServerConfig, chainIndexConfig, walletServerConfig},ccaAvailability} MockWallet =
+runConfigCommand _ ConfigCommandArgs{ccaTrace, ccaPABConfig = Config {nodeServerConfig, chainIndexConfig, walletServerConfig = LocalWalletConfig ws},ccaAvailability} MockWallet =
     liftIO $ WalletServer.main
         (toWalletLog ccaTrace)
-        walletServerConfig
-        (mscFeeConfig nodeServerConfig)
-        (mscSocketPath nodeServerConfig)
-        (mscSlotConfig nodeServerConfig)
+        ws
+        (pscFeeConfig nodeServerConfig)
+        (pscSocketPath nodeServerConfig)
+        (pscSlotConfig nodeServerConfig)
         (ChainIndex.ciBaseUrl chainIndexConfig)
         ccaAvailability
 
+-- Run mock wallet service
+runConfigCommand _ ConfigCommandArgs{ccaPABConfig = Config {walletServerConfig = RemoteWalletConfig}} MockWallet =
+    error "Plutus.PAB.Run.Cli.runConfigCommand: Can't run mock wallet in remote wallet config."
+
 -- Run mock node server
-runConfigCommand _ ConfigCommandArgs{ccaTrace, ccaPABConfig = Config {nodeServerConfig},ccaAvailability} StartMockNode =
-    case mscNodeMode nodeServerConfig of
+runConfigCommand _ ConfigCommandArgs{ccaTrace, ccaPABConfig = Config {nodeServerConfig},ccaAvailability} StartNode =
+    case pscNodeMode nodeServerConfig of
         MockNode -> do
             liftIO $ NodeServer.main
                 (toMockNodeServerLog ccaTrace)
@@ -180,8 +169,7 @@ runConfigCommand contractHandler ConfigCommandArgs{ccaTrace, ccaPABConfig=config
                     logInfo @(LM.PABMultiAgentMsg (Builtin a)) (LM.PABStateRestored $ length ts)
 
               -- then, actually start the server.
-              let walletClientEnv = App.walletClientEnv (Core.appEnv env)
-              (mvar, _) <- PABServer.startServer pabWebserverConfig (Left walletClientEnv) ccaAvailability
+              (mvar, _) <- PABServer.startServer pabWebserverConfig ccaAvailability
               liftIO $ takeMVar mvar
         either handleError return result
   where
@@ -190,12 +178,20 @@ runConfigCommand contractHandler ConfigCommandArgs{ccaTrace, ccaPABConfig=config
         exitWith (ExitFailure 2)
 
 -- Fork a list of commands
-runConfigCommand contractHandler c@ConfigCommandArgs{ccaAvailability} (ForkCommands commands) =
-    void $ do
-        threads <- traverse forkCommand commands
-        putStrLn "Started all commands."
-        waitAny threads
+runConfigCommand contractHandler c@ConfigCommandArgs{ccaAvailability, ccaPABConfig=Config {nodeServerConfig} } (ForkCommands commands) =
+    let shouldStartMocks = case pscNodeMode nodeServerConfig of
+                             MockNode   -> True
+                             AlonzoNode -> False
+     in void $ do
+          threads <- traverse forkCommand
+                   $ filter (mockedServices shouldStartMocks) commands
+          putStrLn "Started all commands."
+          waitAny threads
   where
+    mockedServices :: Bool -> ConfigCommand -> Bool
+    mockedServices shouldStartMocks ChainIndex = shouldStartMocks
+    mockedServices shouldStartMocks MockWallet = shouldStartMocks
+    mockedServices _ _                         = True
     forkCommand :: ConfigCommand -> IO (Async ())
     forkCommand subcommand = do
       putStrLn $ "Starting: " <> show subcommand
@@ -209,8 +205,8 @@ runConfigCommand _ ConfigCommandArgs{ccaTrace, ccaPABConfig=Config { nodeServerC
     ChainIndex.main
         (toChainIndexLog ccaTrace)
         chainIndexConfig
-        (mscSocketPath nodeServerConfig)
-        (mscSlotConfig nodeServerConfig)
+        (pscSocketPath nodeServerConfig)
+        (pscSlotConfig nodeServerConfig)
 
 -- Get the state of a contract
 runConfigCommand _ ConfigCommandArgs{ccaTrace, ccaPABConfig=Config{dbConfig}} (ContractState contractInstanceId) = do
@@ -266,10 +262,6 @@ runConfigCommand _ ConfigCommandArgs{ccaTrace, ccaPABConfig=Config{dbConfig}} (R
       logStep response = logInfo @(LM.AppMsg (Builtin a)) $
           LM.ContractHistoryItem contractInstanceId (snd <$> response)
 
-runConfigCommand _ _ PSApiGenerator {psApiGenOutputDir} = do
-    PSGenerator.generateAPIModule (Proxy @a) psApiGenOutputDir
-    PSGenerator.generateWith @a psApiGenOutputDir
-
 toPABMsg :: Trace m (LM.AppMsg (Builtin a)) -> Trace m (LM.PABLogMsg (Builtin a))
 toPABMsg = LM.convertLog LM.PABMsg
 
@@ -279,7 +271,7 @@ toChainIndexLog = LM.convertLog $ LM.PABMsg . LM.SChainIndexServerMsg
 toWalletLog :: Trace m (LM.AppMsg (Builtin a)) -> Trace m WalletMsg
 toWalletLog = LM.convertLog $ LM.PABMsg . LM.SWalletMsg
 
-toMockNodeServerLog :: Trace m (LM.AppMsg (Builtin a)) -> Trace m LM.MockServerLogMsg
+toMockNodeServerLog :: Trace m (LM.AppMsg (Builtin a)) -> Trace m LM.PABServerLogMsg
 toMockNodeServerLog = LM.convertLog $ LM.PABMsg . LM.SMockserverLogMsg
 
 -- | Wait for some time to allow all log messages to be printed to

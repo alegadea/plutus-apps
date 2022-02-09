@@ -9,7 +9,7 @@
 {-# LANGUAGE TypeFamilies       #-}
 module Spec.Auction
     ( tests
-    , auctionEmulatorCfg
+    , options
     , auctionTrace1
     , auctionTrace2
     , prop_Auction
@@ -54,7 +54,7 @@ slotCfg = def
 params :: AuctionParams
 params =
     AuctionParams
-        { apOwner   = walletPubKeyHash w1
+        { apOwner   = mockWalletPaymentPubKeyHash w1
         , apAsset   = theToken
         , apEndTime = TimeSlot.scSlotZeroTime slotCfg + 100000
         }
@@ -68,15 +68,10 @@ theToken =
     -- This currency is created by the initial transaction.
     Value.singleton mpsHash "token" 1
 
--- | 'EmulatorConfig' that includes 'theToken' in the initial distribution of Wallet 1.
-auctionEmulatorCfg :: Trace.EmulatorConfig
-auctionEmulatorCfg =
-    let initialDistribution = defaultDist & over (ix w1) ((<>) theToken)
-    in (def & Trace.initialChainState .~ Left initialDistribution) & Trace.slotConfig .~ slotCfg
-
--- | 'CheckOptions' that includes our own 'auctionEmulatorCfg'.
+-- | 'CheckOptions' that includes 'theToken' in the initial distribution of Wallet 1.
 options :: CheckOptions
-options = set emulatorConfig auctionEmulatorCfg defaultCheckOptions
+options = defaultCheckOptions
+    & changeInitialWalletValue w1 ((<>) theToken)
 
 seller :: Contract AuctionOutput SellerSchema AuctionError ()
 seller = auctionSeller (apAsset params) (apEndTime params)
@@ -129,7 +124,7 @@ trace1FinalState =
     AuctionOutput
         { auctionState = Last $ Just $ Finished $ HighestBid
             { highestBid = trace1WinningBid
-            , highestBidder = walletPubKeyHash w2
+            , highestBidder = mockWalletPaymentPubKeyHash w2
             }
         , auctionThreadToken = Last $ Just threadToken
         }
@@ -139,7 +134,7 @@ trace2FinalState =
     AuctionOutput
         { auctionState = Last $ Just $ Finished $ HighestBid
             { highestBid = trace2WinningBid
-            , highestBidder = walletPubKeyHash w2
+            , highestBidder = mockWalletPaymentPubKeyHash w2
             }
         , auctionThreadToken = Last $ Just threadToken
         }
@@ -194,6 +189,8 @@ instance ContractModel AuctionModel where
         , _phase      = NotStarted
         }
 
+    initialHandleSpecs = ContractInstanceSpec SellerH w1 seller : [ ContractInstanceSpec (BuyerH w) w (buyer threadToken) | w <- [w2, w3, w4] ]
+
     arbitraryAction s
         | p /= NotStarted =
             oneof [ WaitUntil . step <$> choose (1, 10 :: Integer)
@@ -209,11 +206,16 @@ instance ContractModel AuctionModel where
         case cmd of
             WaitUntil slot -> slot > s ^. currentSlot
 
-            -- In order to place a bid, we need to satifsy the constraint where
+            -- In order to place a bid, we need to satisfy the constraint where
             -- each tx output must have at least N Ada.
+            --
             -- When we bid, we must make sure that we don't bid too high such
-            -- that we can't pay to fees anymore and have a tx output of less
-            -- than N Ada.
+            -- that:
+            --     - we can't pay for fees anymore
+            --     - we have a tx output of less than N Ada.
+            --
+            -- We suppose the initial balance is 100 Ada. Needs to be changed if
+            -- the emulator initialises the wallets with a different value.
             Bid w bid      -> let currentWalletBalance = Ada.adaOf 100 + Ada.fromValue (s ^. balanceChange w)
                                   current = s ^. contractState . currentBid
                                in    bid > current
@@ -270,17 +272,14 @@ instance ContractModel AuctionModel where
 
     monitoring _ _ = id
 
-delay :: Integer -> Trace.EmulatorTrace ()
+delay :: Integer -> Trace.EmulatorTraceNoStartContract ()
 delay n = void $ Trace.waitNSlots $ fromIntegral n
 
 prop_Auction :: Actions AuctionModel -> Property
-prop_Auction =
-    propRunActionsWithOptions (set minLogLevel Debug options) handleSpec
-        (const $ pure True)  -- TODO: check termination
-
-handleSpec :: [ContractInstanceSpec AuctionModel]
-handleSpec = ContractInstanceSpec SellerH w1 seller :
-             [ ContractInstanceSpec (BuyerH w) w (buyer threadToken) | w <- [w2, w3, w4] ]
+prop_Auction script =
+    propRunActionsWithOptions (set minLogLevel Info options) defaultCoverageOptions
+        (\ _ -> pure True)  -- TODO: check termination
+        script
 
 finishAuction :: DL AuctionModel ()
 finishAuction = do
@@ -308,7 +307,7 @@ noLockProof = NoLockedFundsProof
       when (slot < 101) $ action $ WaitUntil 101
 
 prop_NoLockedFunds :: Property
-prop_NoLockedFunds = checkNoLockedFundsProof options handleSpec noLockProof
+prop_NoLockedFunds = checkNoLockedFundsProof options noLockProof
 
 tests :: TestTree
 tests =

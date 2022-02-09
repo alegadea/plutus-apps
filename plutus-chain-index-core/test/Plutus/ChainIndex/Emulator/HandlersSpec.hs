@@ -3,6 +3,7 @@
 {-# LANGUAGE MonoLocalBinds    #-}
 {-# LANGUAGE NamedFieldPuns    #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections     #-}
 {-# LANGUAGE TypeApplications  #-}
 
 module Plutus.ChainIndex.Emulator.HandlersSpec (tests) where
@@ -22,11 +23,12 @@ import Generators qualified as Gen
 import Ledger (outValue)
 import Plutus.ChainIndex (ChainIndexLog, Page (pageItems), PageQuery (PageQuery), appendBlock, txFromTxId,
                           utxoSetMembership, utxoSetWithCurrency)
+import Plutus.ChainIndex.Api (IsUtxoResponse (isUtxo), UtxosResponse (UtxosResponse))
 import Plutus.ChainIndex.ChainIndexError (ChainIndexError)
 import Plutus.ChainIndex.Effects (ChainIndexControlEffect, ChainIndexQueryEffect)
 import Plutus.ChainIndex.Emulator.Handlers (ChainIndexEmulatorState, handleControl, handleQuery)
 import Plutus.ChainIndex.Tx (_ValidTx, citxOutputs, citxTxId)
-import Plutus.ChainIndex.Types (BlockProcessOption (..))
+import Plutus.ChainIndex.Types (ChainSyncBlock (..), TxProcessOption (..))
 import Plutus.V1.Ledger.Value (AssetClass (AssetClass), flattenValue)
 
 import Hedgehog (Property, assert, forAll, property, (===))
@@ -59,7 +61,7 @@ txFromTxIdSpec = property $ do
   (tip, block@(fstTx:_)) <- forAll $ Gen.evalTxGenState Gen.genNonEmptyBlock
   unknownTxId <- forAll Gen.genRandomTxId
   txs <- liftIO $ runEmulatedChainIndex mempty $ do
-    appendBlock tip block def
+    appendBlock (Block tip (map (, def) block))
     tx <- txFromTxId (view citxTxId fstTx)
     tx' <- txFromTxId unknownTxId
     pure (tx, tx')
@@ -77,7 +79,7 @@ eachTxOutRefAtAddressShouldBeUnspentSpec = property $ do
 
   result <- liftIO $ runEmulatedChainIndex mempty $ do
     -- Append the generated block in the chain index
-    appendBlock tip block def
+    appendBlock (Block tip (map (, def) block))
     utxoSetFromBlockAddrs block
 
   case result of
@@ -98,11 +100,11 @@ eachTxOutRefWithCurrencyShouldBeUnspentSpec = property $ do
 
   result <- liftIO $ runEmulatedChainIndex mempty $ do
     -- Append the generated block in the chain index
-    appendBlock tip block def
+    appendBlock (Block tip (map (, def) block))
 
     forM assetClasses $ \ac -> do
       let pq = PageQuery 200 Nothing
-      (_, utxoRefs) <- utxoSetWithCurrency pq ac
+      UtxosResponse _ utxoRefs <- utxoSetWithCurrency pq ac
       pure $ pageItems utxoRefs
 
   case result of
@@ -118,10 +120,10 @@ cantRequestForTxOutRefsWithAdaSpec = property $ do
 
   result <- liftIO $ runEmulatedChainIndex mempty $ do
     -- Append the generated block in the chain index
-    appendBlock tip block def
+    appendBlock (Block tip (map (, def) block))
 
     let pq = PageQuery 200 Nothing
-    (_, utxoRefs) <- utxoSetWithCurrency pq (AssetClass ("", ""))
+    UtxosResponse _ utxoRefs <- utxoSetWithCurrency pq (AssetClass ("", ""))
     pure $ pageItems utxoRefs
 
   case result of
@@ -135,13 +137,13 @@ doNotStoreTxs :: Property
 doNotStoreTxs = property $ do
   ((tip, block), state) <- forAll $ Gen.runTxGenState Gen.genNonEmptyBlock
   result <- liftIO $ runEmulatedChainIndex mempty $ do
-    appendBlock tip block BlockProcessOption{bpoStoreTxs=False}
+    appendBlock (Block tip (map (, TxProcessOption{tpoStoreTx=False}) block))
     tx <- txFromTxId (view citxTxId (head block))
     utxosFromAddr <- utxoSetFromBlockAddrs block
     utxosStored <- traverse utxoSetMembership (S.toList (view Gen.txgsUtxoSet state))
     pure (tx, concat utxosFromAddr, utxosStored)
   case result of
-    Right (Nothing, [], utxosStored) -> Hedgehog.assert $ and (snd <$> utxosStored)
+    Right (Nothing, [], utxosStored) -> Hedgehog.assert $ and (isUtxo <$> utxosStored)
     _                                -> Hedgehog.assert False
 
 -- | Run an emulated chain index effect against a starting state

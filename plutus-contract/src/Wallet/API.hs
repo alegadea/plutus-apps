@@ -23,8 +23,9 @@ Mock wallet implementation
 module Wallet.API(
     WalletEffect,
     submitTxn,
-    ownPubKeyHash,
+    ownPaymentPubKeyHash,
     balanceTx,
+    yieldUnbalancedTx,
     NodeClientEffect,
     publishTx,
     getClientSlot,
@@ -33,8 +34,8 @@ module Wallet.API(
     PubKeyHash(..),
     signTxAndSubmit,
     signTxAndSubmit_,
-    payToPublicKeyHash,
-    payToPublicKeyHash_,
+    payToPaymentPublicKeyHash,
+    payToPaymentPublicKeyHash_,
     -- * Slot ranges
     Interval(..),
     Slot,
@@ -50,25 +51,27 @@ module Wallet.API(
     after,
     contains,
     -- * Error handling
-    WalletAPIError(..),
-    throwInsufficientFundsError,
-    throwOtherError,
+    Wallet.Error.WalletAPIError(..),
+    Wallet.Error.throwInsufficientFundsError,
+    Wallet.Error.throwOtherError,
     ) where
 
 import Control.Monad (unless, void)
-import Control.Monad.Freer
+import Control.Monad.Freer (Eff, Member)
 import Control.Monad.Freer.Error (Error, throwError)
 import Control.Monad.Freer.Extras.Log (LogMsg, logWarn)
 import Data.Default (Default (def))
 import Data.Text (Text)
 import Data.Void (Void)
-import Ledger hiding (inputs, out, value)
+import Ledger (CardanoTx, Interval (Interval, ivFrom, ivTo), PaymentPubKeyHash, PubKey (PubKey, getPubKey),
+               PubKeyHash (PubKeyHash, getPubKeyHash), Slot, SlotRange, Value, after, always, before, contains,
+               interval, isEmpty, member, singleton, width)
 import Ledger.Constraints qualified as Constraints
 import Ledger.TimeSlot qualified as TimeSlot
-import Wallet.Effects
-import Wallet.Emulator.Error
-
-import Prelude hiding (Ordering (..))
+import Wallet.Effects (NodeClientEffect, WalletEffect, balanceTx, getClientSlot, getClientSlotConfig,
+                       ownPaymentPubKeyHash, publishTx, submitTxn, walletAddSignature, yieldUnbalancedTx)
+import Wallet.Error (WalletAPIError (PaymentMkTxError))
+import Wallet.Error qualified
 
 -- | Transfer some funds to an address locked by a public key, returning the
 --   transaction that was submitted.
@@ -76,13 +79,13 @@ import Prelude hiding (Ordering (..))
 --  Note: Due to a constraint in the Cardano ledger, each tx output must have a
 --  minimum amount of Ada. Therefore, the funds to transfer will be adjusted
 --  to satisfy that constraint. See 'Ledger.Constraints.OffChain.adjustUnbalancedTx.
-payToPublicKeyHash ::
+payToPaymentPublicKeyHash ::
     ( Member WalletEffect effs
     , Member (Error WalletAPIError) effs
     , Member (LogMsg Text) effs
     )
-    => SlotRange -> Value -> PubKeyHash -> Eff effs CardanoTx
-payToPublicKeyHash range v pk = do
+    => SlotRange -> Value -> PaymentPubKeyHash -> Eff effs CardanoTx
+payToPaymentPublicKeyHash range v pk = do
     let constraints = Constraints.mustPayToPubKey pk v
                    <> Constraints.mustValidateIn (TimeSlot.slotRangeToPOSIXTimeRange def range)
     utx <- either (throwError . PaymentMkTxError)
@@ -96,13 +99,13 @@ payToPublicKeyHash range v pk = do
     either throwError signTxAndSubmit balancedTx
 
 -- | Transfer some funds to an address locked by a public key.
-payToPublicKeyHash_ ::
+payToPaymentPublicKeyHash_ ::
     ( Member WalletEffect effs
     , Member (Error WalletAPIError) effs
     , Member (LogMsg Text) effs
     )
-    => SlotRange -> Value -> PubKeyHash -> Eff effs ()
-payToPublicKeyHash_ r v = void . payToPublicKeyHash r v
+    => SlotRange -> Value -> PaymentPubKeyHash -> Eff effs ()
+payToPaymentPublicKeyHash_ r v = void . payToPaymentPublicKeyHash r v
 
 -- | Add the wallet's signature to the transaction and submit it. Returns
 --   the transaction with the wallet's signature.

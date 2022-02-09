@@ -14,7 +14,7 @@ build-type: Simple
 
 source-repository head
     type: git
-    location: https://github.com/input-output-hk/plutus
+    location: https://github.com/input-output-hk/plutus-apps
 
 flag defer-plugin-errors
     description:
@@ -67,6 +67,7 @@ executable doc-doctests
       plutus-tx -any,
       plutus-ledger -any,
       plutus-ledger-api -any,
+      plutus-ledger-constraints -any,
       plutus-contract -any,
       playground-common -any,
       plutus-use-cases -any,

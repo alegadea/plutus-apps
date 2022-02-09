@@ -5,51 +5,34 @@
 {-# LANGUAGE NumericUnderscores #-}
 module Main(main) where
 
-import Control.Lens
-import Control.Monad (forM_, guard, replicateM, void)
-import Control.Monad.Trans.Except (runExcept)
+import Control.Monad (forM_)
 import Data.Aeson qualified as JSON
 import Data.Aeson.Extras qualified as JSON
 import Data.Aeson.Internal qualified as Aeson
-import Data.ByteString qualified as BSS
 import Data.ByteString.Lazy qualified as BSL
-import Data.Default (Default (def))
-import Data.Either (isLeft, isRight)
-import Data.Foldable (fold, foldl', traverse_)
 import Data.List (sort)
 import Data.Map qualified as Map
 import Data.Maybe (fromJust)
-import Data.Monoid (Sum (..))
-import Data.Set qualified as Set
 import Data.String (IsString (fromString))
 import Hedgehog (Property, forAll, property)
 import Hedgehog qualified
 import Hedgehog.Gen qualified as Gen
 import Hedgehog.Range qualified as Range
-import Ledger
+import Ledger (DiffMilliSeconds (DiffMilliSeconds), Interval (Interval), LowerBound (LowerBound), Slot (Slot),
+               UpperBound (UpperBound), fromMilliSeconds, interval)
+import Ledger qualified
 import Ledger.Ada qualified as Ada
 import Ledger.Bytes as Bytes
-import Ledger.Constraints.OffChain qualified as OC
-import Ledger.Contexts qualified as Validation
-import Ledger.Crypto qualified as Crypto
 import Ledger.Fee (FeeConfig (..), calcFees)
 import Ledger.Generators qualified as Gen
-import Ledger.Index qualified as Index
 import Ledger.Interval qualified as Interval
-import Ledger.Scripts qualified as Scripts
 import Ledger.TimeSlot (SlotConfig (..))
 import Ledger.TimeSlot qualified as TimeSlot
 import Ledger.Tx qualified as Tx
-import Ledger.Value (CurrencySymbol, Value (Value))
+import Ledger.Tx.CardanoAPISpec qualified
 import Ledger.Value qualified as Value
-import PlutusCore.Default qualified as PLC
-import PlutusTx (CompiledCode, applyCode, liftCode)
-import PlutusTx qualified
-import PlutusTx.AssocMap qualified as AMap
-import PlutusTx.AssocMap qualified as AssocMap
-import PlutusTx.Builtins qualified as Builtins
 import PlutusTx.Prelude qualified as PlutusTx
-import Test.Tasty hiding (after)
+import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (testCase)
 import Test.Tasty.HUnit qualified as HUnit
 import Test.Tasty.Hedgehog (testProperty)
@@ -96,9 +79,6 @@ tests = testGroup "all tests" [
                     vlJson = "{\"getValue\":[[{\"unCurrencySymbol\":\"\"},[[{\"unTokenName\":\"\"},50]]]]}"
                     vlValue = Ada.lovelaceValueOf 50
                 in byteStringJson vlJson vlValue)),
-    testGroup "Constraints" [
-        testProperty "missing value spent" missingValueSpentProp
-        ],
     testGroup "Tx" [
         testProperty "TxOut fromTxOut/toTxOut" ciTxOutRoundTrip
         ],
@@ -118,6 +98,10 @@ tests = testGroup "all tests" [
         ],
     testGroup "SomeCardanoApiTx" [
         testProperty "Value ToJSON/FromJSON" (jsonRoundTrip Gen.genSomeCardanoApiTx)
+        ],
+    Ledger.Tx.CardanoAPISpec.tests,
+    testGroup "Signing" [
+        testProperty "signed payload verifies with public key" signAndVerifyTest
         ]
     ]
 
@@ -182,7 +166,7 @@ intvlContains :: Property
 intvlContains = property $ do
     -- generate two intervals from a sorted list of ints
     -- the outer interval contains the inner interval
-    ints <- forAll $ traverse (const $ Gen.integral (fromIntegral <$> Range.linearBounded @Int)) [1..4]
+    ints <- forAll $ traverse (const $ Gen.integral (fromIntegral <$> Range.linearBounded @Int)) [(1::Integer)..4]
     let [i1, i2, i3, i4] = Slot <$> sort ints
         outer = Interval.interval i1 i4
         inner = Interval.interval i2 i3
@@ -234,61 +218,12 @@ currencySymbolIsStringShow = property $ do
     let cs' = fromString (show cs)
     Hedgehog.assert $ cs' == cs
 
--- byteStringJson :: (Eq a, JSON.FromJSON a) => BSL.ByteString -> a -> [TestCase]
+byteStringJson :: (Show a, Eq a, JSON.ToJSON a, JSON.FromJSON a) => BSL.ByteString -> a -> [TestTree]
 byteStringJson jsonString value =
     [ testCase "decoding" $
         HUnit.assertEqual "Simple Decode" (Right value) (JSON.eitherDecode jsonString)
     , testCase "encoding" $ HUnit.assertEqual "Simple Encode" jsonString (JSON.encode value)
     ]
-
--- | Check that 'missingValueSpent' is the smallest value needed to
---   meet the requirements.
-missingValueSpentProp :: Property
-missingValueSpentProp = property $ do
-    let valueSpentBalances = Gen.choice
-            [ OC.provided <$> nonNegativeValue
-            , OC.required <$> nonNegativeValue
-            ]
-        empty = OC.ValueSpentBalances mempty mempty
-    balances <- foldl (<>) empty <$> forAll (Gen.list (Range.linear 0 10000) valueSpentBalances)
-    let missing = OC.missingValueSpent balances
-        actual = OC.vbsProvided balances
-    Hedgehog.annotateShow missing
-    Hedgehog.annotateShow actual
-    Hedgehog.assert (OC.vbsRequired balances `Value.leq` (actual <> missing))
-
-    -- To make sure that this is indeed the smallest value meeting
-    -- the requirements, we reduce it by one and check that the property doesn't
-    -- hold anymore.
-    smaller <- forAll (reduceByOne missing)
-    forM_ smaller $ \smaller' ->
-        Hedgehog.assert (not (OC.vbsRequired balances `Value.leq` (actual <> smaller')))
-
-
--- | Reduce one of the elements in a 'Value' by one.
---   Returns 'Nothing' if the value contains no positive
---   elements.
-reduceByOne :: Hedgehog.MonadGen m => Value -> m (Maybe Value)
-reduceByOne (Value.Value value) = do
-    let flat = do
-            (currency, rest) <- AMap.toList value
-            (tokenName, amount) <- AMap.toList rest
-            guard (amount > 0)
-            pure (currency, tokenName, pred amount)
-    if null flat
-        then pure Nothing
-        else (\(cur, tok, amt) -> Just $ Value.singleton cur tok amt) <$> Gen.element flat
-
--- | A 'Value' with non-negative entries taken from a relatively
---   small pool of MPS hashes and token names.
-nonNegativeValue :: Hedgehog.MonadGen m => m Value
-nonNegativeValue =
-    let mpsHashes = ["ffff", "dddd", "cccc", "eeee", "1010"]
-        tokenNames = ["a", "b", "c", "d"]
-    in Value.singleton
-        <$> Gen.element mpsHashes
-        <*> Gen.element tokenNames
-        <*> Gen.integral (Range.linear 0 10000)
 
 -- | Validate inverse property between 'fromTxOut' and 'toTxOut given a 'TxOut'.
 ciTxOutRoundTrip :: Property
@@ -307,7 +242,7 @@ calcFeesTest = property $ do
 initialSlotToTimeProp :: Property
 initialSlotToTimeProp = property $ do
     sc <- forAll Gen.genSlotConfig
-    n <- forAll $ Gen.int (fromInteger <$> Range.linear 0 (fromIntegral $ scSlotLength sc))
+    n <- forAll $ Gen.int (fromInteger <$> Range.linear 0 (scSlotLength sc))
     let diff = DiffMilliSeconds $ toInteger n
     let time = TimeSlot.scSlotZeroTime sc + fromMilliSeconds diff
     if diff >= fromIntegral (scSlotLength sc)
@@ -374,3 +309,12 @@ slotToTimeRangeBoundsInverseProp = property $ do
                                   (TimeSlot.slotToPOSIXTimeRange sc slot)
     Hedgehog.assert $ interval slot slot == slotRange
 
+signAndVerifyTest :: Property
+signAndVerifyTest = property $ do
+  seed <- forAll Gen.genSeed
+  pass <- forAll Gen.genPassphrase
+  let
+    privKey = Ledger.generateFromSeed seed pass
+    pubKey = Ledger.toPublicKey privKey
+  payload <- forAll $ Gen.bytes $ Range.singleton 128
+  Hedgehog.assert $ (\x -> Ledger.signedBy x pubKey payload) $ Ledger.sign payload privKey pass

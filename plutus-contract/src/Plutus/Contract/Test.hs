@@ -9,6 +9,7 @@
 {-# LANGUAGE LambdaCase           #-}
 {-# LANGUAGE NamedFieldPuns       #-}
 {-# LANGUAGE OverloadedStrings    #-}
+{-# LANGUAGE RankNTypes           #-}
 {-# LANGUAGE TemplateHaskell      #-}
 {-# LANGUAGE TypeApplications     #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -58,11 +59,13 @@ module Plutus.Contract.Test(
     , checkPredicateGen
     , checkPredicateGenOptions
     , checkPredicateInner
+    , checkPredicateInnerStream
     , checkEmulatorFails
     , CheckOptions
     , defaultCheckOptions
     , minLogLevel
     , emulatorConfig
+    , changeInitialWalletValue
     -- * Etc
     , goldenPir
     ) where
@@ -71,7 +74,7 @@ import Control.Applicative (liftA2)
 import Control.Arrow ((>>>))
 import Control.Foldl (FoldM)
 import Control.Foldl qualified as L
-import Control.Lens (at, makeLenses, preview, to, (&), (.~), (^.))
+import Control.Lens (_Left, at, ix, makeLenses, over, preview, to, (&), (.~), (^.))
 import Control.Monad (unless)
 import Control.Monad.Freer (Eff, reinterpret, runM, sendM)
 import Control.Monad.Freer.Error (Error, runError)
@@ -131,7 +134,6 @@ import Wallet.Emulator.Folds (EmulatorFoldErr (..), Outcome (..), describeError,
 import Wallet.Emulator.Folds qualified as Folds
 import Wallet.Emulator.Stream (filterLogLevel, foldEmulatorStreamM, initialChainState, initialDist)
 
-
 type TracePredicate = FoldM (Eff '[Reader InitialDistribution, Error EmulatorFoldErr, Writer (Doc Void)]) EmulatorEvent Bool
 
 infixl 3 .&&.
@@ -151,7 +153,7 @@ data CheckOptions =
     CheckOptions
         { _minLogLevel    :: LogLevel -- ^ Minimum log level for emulator log messages to be included in the test output (printed if the test fails)
         , _emulatorConfig :: EmulatorConfig
-        } deriving (Eq, Show)
+        }
 
 makeLenses ''CheckOptions
 
@@ -161,6 +163,10 @@ defaultCheckOptions =
         { _minLogLevel = Info
         , _emulatorConfig = def
         }
+
+-- | Modify the value assigned to the given wallet in the initial distribution.
+changeInitialWalletValue :: Wallet -> (Value -> Value) -> CheckOptions -> CheckOptions
+changeInitialWalletValue wallet = over (emulatorConfig . initialChainState . _Left . ix wallet)
 
 type TestEffects = '[Reader InitialDistribution, Error EmulatorFoldErr, Writer (Doc Void)]
 
@@ -202,19 +208,28 @@ checkPredicateInner :: forall m.
     -> (String -> m ()) -- ^ Print out debug information in case of test failures
     -> (Bool -> m ()) -- ^ assert
     -> m ()
-checkPredicateInner CheckOptions{_minLogLevel, _emulatorConfig} predicate action annot assert = do
+checkPredicateInner opts@CheckOptions{_emulatorConfig} predicate action annot assert =
+    checkPredicateInnerStream opts predicate (S.void $ runEmulatorStream _emulatorConfig action) annot assert
+
+checkPredicateInnerStream :: forall m.
+    Monad m
+    => CheckOptions
+    -> TracePredicate
+    -> (forall effs. S.Stream (S.Of (LogMessage EmulatorEvent)) (Eff effs) ())
+    -> (String -> m ()) -- ^ Print out debug information in case of test failures
+    -> (Bool -> m ()) -- ^ assert
+    -> m ()
+checkPredicateInnerStream CheckOptions{_minLogLevel, _emulatorConfig} predicate theStream annot assert = do
     let dist = _emulatorConfig ^. initialChainState . to initialDist
-        theStream :: forall effs. S.Stream (S.Of (LogMessage EmulatorEvent)) (Eff effs) ()
-        theStream = S.void $ runEmulatorStream _emulatorConfig action
-        consumeStream :: forall a. S.Stream (S.Of (LogMessage EmulatorEvent)) (Eff TestEffects) a -> Eff TestEffects (S.Of Bool a)
-        consumeStream = foldEmulatorStreamM @TestEffects predicate
+        consumedStream :: Eff TestEffects Bool
+        consumedStream = S.fst' <$> foldEmulatorStreamM @TestEffects predicate theStream
     result <- runM
                 $ reinterpret @(Writer (Doc Void)) @m  (\case { Tell d -> sendM $ annot $ Text.unpack $ renderStrict $ layoutPretty defaultLayoutOptions d })
                 $ runError
                 $ runReader dist
-                $ consumeStream theStream
+                $ consumedStream
 
-    unless (fmap S.fst' result == Right True) $ do
+    unless (result == Right True) $ do
         annot "Test failed."
         annot "Emulator log:"
         S.mapM_ annot
@@ -229,7 +244,7 @@ checkPredicateInner CheckOptions{_minLogLevel, _emulatorConfig} predicate action
                 annot (describeError err)
                 annot (show err)
                 assert False
-            Right r -> assert $ S.fst' r
+            Right r -> assert r
 
 -- | A version of 'checkPredicateGen' with configurable 'CheckOptions'
 checkPredicateGenOptions ::

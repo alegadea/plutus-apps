@@ -32,7 +32,7 @@ module Plutus.PAB.Simulator(
     , logString
     -- ** Agent actions
     , payToWallet
-    , payToPublicKeyHash
+    , payToPaymentPublicKeyHash
     , activateContract
     , callEndpointOnInstance
     , handleAgentThread
@@ -81,14 +81,14 @@ import Control.Monad.Freer (Eff, LastMember, Member, interpret, reinterpret, rei
 import Control.Monad.Freer.Delay (DelayEffect, delayThread, handleDelayEffect)
 import Control.Monad.Freer.Error (Error, handleError, runError, throwError)
 import Control.Monad.Freer.Extras qualified as Modify
-import Control.Monad.Freer.Extras.Log (LogLevel (Info), LogMessage, LogMsg (..), handleLogWriter, logInfo, logLevel,
-                                       mapLog)
+import Control.Monad.Freer.Extras.Log (LogLevel (Info), LogMessage, LogMsg (LMessage), handleLogWriter, logInfo,
+                                       logLevel, mapLog)
 import Control.Monad.Freer.Reader (Reader, ask, asks)
-import Control.Monad.Freer.State (State (..), runState)
-import Control.Monad.Freer.Writer (Writer (..), runWriter)
-import Control.Monad.IO.Class (MonadIO (..))
+import Control.Monad.Freer.State (State (Get, Put), runState)
+import Control.Monad.Freer.Writer (Writer, runWriter)
+import Control.Monad.IO.Class (MonadIO (liftIO))
 import Data.Aeson qualified as JSON
-import Data.Default (Default (..))
+import Data.Default (Default (def))
 import Data.Foldable (fold, traverse_)
 import Data.Map (Map)
 import Data.Map qualified as Map
@@ -97,44 +97,45 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as Text
 import Data.Time.Units (Millisecond)
-import Ledger (Address (..), Blockchain, CardanoTx, PubKeyHash, TxId, TxOut (..), eitherTx, txFee, txId)
+import Ledger (Address, Blockchain, CardanoTx, PaymentPubKeyHash, TxId, TxOut (TxOut, txOutAddress, txOutValue),
+               eitherTx, txFee, txId)
 import Ledger.Ada qualified as Ada
 import Ledger.CardanoWallet (MockWallet)
 import Ledger.CardanoWallet qualified as CW
 import Ledger.Fee (FeeConfig)
 import Ledger.Index qualified as UtxoIndex
-import Ledger.TimeSlot (SlotConfig (..))
+import Ledger.TimeSlot (SlotConfig (SlotConfig, scSlotLength))
 import Ledger.Value (Value, flattenValue)
 import Plutus.ChainIndex.Emulator (ChainIndexControlEffect, ChainIndexEmulatorState, ChainIndexError, ChainIndexLog,
-                                   ChainIndexQueryEffect (DatumFromHash, GetTip, MintingPolicyFromHash, RedeemerFromHash, StakeValidatorFromHash, TxFromTxId, TxOutFromRef, UtxoSetAtAddress, UtxoSetMembership, UtxoSetWithCurrency, ValidatorFromHash),
+                                   ChainIndexQueryEffect (DatumFromHash, GetTip, MintingPolicyFromHash, RedeemerFromHash, StakeValidatorFromHash, TxFromTxId, TxOutFromRef, TxoSetAtAddress, TxsFromTxIds, UtxoSetAtAddress, UtxoSetMembership, UtxoSetWithCurrency, ValidatorFromHash),
                                    TxOutStatus, TxStatus, getTip)
 import Plutus.ChainIndex.Emulator qualified as ChainIndex
-import Plutus.PAB.Core (EffectHandlers (..))
+import Plutus.PAB.Core (EffectHandlers (EffectHandlers, handleContractDefinitionEffect, handleContractEffect, handleContractStoreEffect, handleLogMessages, handleServicesEffects, initialiseEnvironment, onShutdown, onStartup))
 import Plutus.PAB.Core qualified as Core
 import Plutus.PAB.Core.ContractInstance.BlockchainEnv qualified as BlockchainEnv
-import Plutus.PAB.Core.ContractInstance.STM (Activity (..), BlockchainEnv (..), OpenEndpoint)
+import Plutus.PAB.Core.ContractInstance.STM (Activity, BlockchainEnv, OpenEndpoint)
 import Plutus.PAB.Core.ContractInstance.STM qualified as Instances
 import Plutus.PAB.Effects.Contract (ContractStore)
 import Plutus.PAB.Effects.Contract qualified as Contract
-import Plutus.PAB.Effects.Contract.Builtin (HasDefinitions (..))
+import Plutus.PAB.Effects.Contract.Builtin (HasDefinitions (getDefinitions))
 import Plutus.PAB.Effects.TimeEffect (TimeEffect)
-import Plutus.PAB.Monitoring.PABLogMsg (PABMultiAgentMsg (..))
+import Plutus.PAB.Monitoring.PABLogMsg (PABMultiAgentMsg (EmulatorMsg, UserLog, WalletBalancingMsg))
 import Plutus.PAB.Types (PABError (ContractInstanceNotFound, WalletError, WalletNotFound))
-import Plutus.PAB.Webserver.Types (ContractActivationArgs (..))
+import Plutus.PAB.Webserver.Types (ContractActivationArgs)
 import Plutus.Trace.Emulator.System (appendNewTipBlock)
 import Plutus.V1.Ledger.Slot (Slot)
 import Plutus.V1.Ledger.Tx (TxOutRef)
 import Prettyprinter (Pretty (pretty), defaultLayoutOptions, layoutPretty)
 import Prettyprinter.Render.Text qualified as Render
 import Wallet.API qualified as WAPI
-import Wallet.Effects (NodeClientEffect (..), WalletEffect)
+import Wallet.Effects (NodeClientEffect (GetClientSlot, GetClientSlotConfig, PublishTx), WalletEffect)
 import Wallet.Emulator qualified as Emulator
-import Wallet.Emulator.Chain (ChainControlEffect, ChainState (..))
+import Wallet.Emulator.Chain (ChainControlEffect, ChainState)
 import Wallet.Emulator.Chain qualified as Chain
 import Wallet.Emulator.LogMessages (TxBalanceMsg)
-import Wallet.Emulator.MultiAgent (EmulatorEvent' (..), _singleton)
+import Wallet.Emulator.MultiAgent (EmulatorEvent' (ChainEvent, ChainIndexEvent), _singleton)
 import Wallet.Emulator.Stream qualified as Emulator
-import Wallet.Emulator.Wallet (Wallet (..), knownWallet, knownWallets)
+import Wallet.Emulator.Wallet (Wallet, knownWallet, knownWallets)
 import Wallet.Emulator.Wallet qualified as Wallet
 import Wallet.Types (ContractInstanceId, NotificationError)
 
@@ -177,7 +178,7 @@ initialState :: forall t. IO (SimulatorState t)
 initialState = do
     let initialDistribution = Map.fromList $ fmap (, Ada.adaValueOf 100_000) knownWallets
         Emulator.EmulatorState{Emulator._chainState} = Emulator.initialState (def & Emulator.initialChainState .~ Left initialDistribution)
-        initialWallets = Map.fromList $ fmap (\w -> (Wallet.Wallet $ Wallet.WalletId $ CW.mwWalletId w, initialAgentState w)) CW.knownWallets
+        initialWallets = Map.fromList $ fmap (\w -> (Wallet.Wallet $ Wallet.WalletId $ CW.mwWalletId w, initialAgentState w)) CW.knownMockWallets
     STM.atomically $
         SimulatorState
             <$> STM.newTQueue
@@ -212,8 +213,8 @@ mkSimulatorHandlers feeCfg slotCfg handleContractEffect =
     EffectHandlers
         { initialiseEnvironment =
             (,,)
-                <$> liftIO (STM.atomically Instances.emptyInstancesState)
-                <*> liftIO (STM.atomically Instances.emptyBlockchainEnv)
+                <$> liftIO (STM.atomically   Instances.emptyInstancesState )
+                <*> liftIO (STM.atomically $ Instances.emptyBlockchainEnv Nothing)
                 <*> liftIO (initialState @t)
         , handleContractStoreEffect =
             interpret handleContractStore
@@ -264,9 +265,10 @@ handleServicesSimulator ::
     => FeeConfig
     -> SlotConfig
     -> Wallet
+    -> Maybe ContractInstanceId
     -> Eff (WalletEffect ': ChainIndexQueryEffect ': NodeClientEffect ': effs)
     ~> Eff effs
-handleServicesSimulator feeCfg slotCfg wallet =
+handleServicesSimulator feeCfg slotCfg wallet _ =
     let makeTimedChainIndexEvent wllt =
             interpret (mapLog @_ @(PABMultiAgentMsg t) EmulatorMsg)
             . reinterpret (Core.timed @EmulatorEvent')
@@ -582,6 +584,8 @@ handleChainIndexEffect = runChainIndexEffects @t . \case
     UtxoSetMembership ref     -> ChainIndex.utxoSetMembership ref
     UtxoSetAtAddress pq addr  -> ChainIndex.utxoSetAtAddress pq addr
     UtxoSetWithCurrency pq ac -> ChainIndex.utxoSetWithCurrency pq ac
+    TxsFromTxIds txids        -> ChainIndex.txsFromTxIds txids
+    TxoSetAtAddress pq addr   -> ChainIndex.txoSetAtAddress pq addr
     GetTip                    -> ChainIndex.getTip
 
 -- | Start a thread that prints log messages to the terminal when they come in.
@@ -719,6 +723,7 @@ blockchain = do
 handleAgentThread ::
     forall t a.
     Wallet
+    -> Maybe ContractInstanceId
     -> Eff (Core.ContractInstanceEffects t (SimulatorState t) '[IO]) a
     -> Simulation t a
 handleAgentThread = Core.handleAgentThread
@@ -733,7 +738,7 @@ instanceActivity = Core.instanceActivity
 
 -- | Create a new wallet with a random key, give it some funds
 --   and add it to the list of simulated wallets.
-addWallet :: forall t. Simulation t (Wallet,PubKeyHash)
+addWallet :: forall t. Simulation t (Wallet, PaymentPubKeyHash)
 addWallet = do
     SimulatorState{_agentStates} <- Core.askUserEnv @t @(SimulatorState t)
     mockWallet <- MockWallet.newWallet
@@ -741,10 +746,10 @@ addWallet = do
         currentWallets <- STM.readTVar _agentStates
         let newWallets = currentWallets & at (Wallet.toMockWallet mockWallet) ?~ AgentState (Wallet.fromMockWallet mockWallet) mempty
         STM.writeTVar _agentStates newWallets
-    _ <- handleAgentThread (knownWallet 2)
+    _ <- handleAgentThread (knownWallet 2) Nothing
             $ Modify.wrapError WalletError
-            $ MockWallet.distributeNewWalletFunds (CW.pubKeyHash mockWallet)
-    pure (Wallet.toMockWallet mockWallet, CW.pubKeyHash mockWallet)
+            $ MockWallet.distributeNewWalletFunds (CW.paymentPubKeyHash mockWallet)
+    pure (Wallet.toMockWallet mockWallet, CW.paymentPubKeyHash mockWallet)
 
 
 -- | Retrieve the balances of all the entities in the simulator.
@@ -772,11 +777,11 @@ logString = logInfo @(PABMultiAgentMsg t) . UserLog . Text.pack
 
 -- | Make a payment from one wallet to another
 payToWallet :: forall t. Wallet -> Wallet -> Value -> Simulation t CardanoTx
-payToWallet source target = payToPublicKeyHash source (Emulator.walletPubKeyHash target)
+payToWallet source target = payToPaymentPublicKeyHash source (Emulator.mockWalletPaymentPubKeyHash target)
 
 -- | Make a payment from one wallet to a public key address
-payToPublicKeyHash :: forall t. Wallet -> PubKeyHash -> Value -> Simulation t CardanoTx
-payToPublicKeyHash source target amount =
-    handleAgentThread source
+payToPaymentPublicKeyHash :: forall t. Wallet -> PaymentPubKeyHash -> Value -> Simulation t CardanoTx
+payToPaymentPublicKeyHash source target amount =
+    handleAgentThread source Nothing
         $ flip (handleError @WAPI.WalletAPIError) (throwError . WalletError)
-        $ WAPI.payToPublicKeyHash WAPI.defaultSlotRange amount target
+        $ WAPI.payToPaymentPublicKeyHash WAPI.defaultSlotRange amount target
