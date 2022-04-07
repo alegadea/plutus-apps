@@ -6,6 +6,7 @@
 {-# LANGUAGE LambdaCase            #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE NamedFieldPuns        #-}
+{-# LANGUAGE NumericUnderscores    #-}
 {-# LANGUAGE OverloadedStrings     #-}
 {-# LANGUAGE PartialTypeSignatures #-}
 {-# LANGUAGE RankNTypes            #-}
@@ -33,9 +34,8 @@ import Cardano.Api.ProtocolParameters ()
 import Cardano.Api.Shelley (ProtocolParameters)
 import Cardano.BM.Trace (Trace, logDebug)
 import Cardano.ChainIndex.Types qualified as ChainIndex
-import Cardano.Node.Client (handleNodeClientClient)
-import Cardano.Node.Client qualified as NodeClient
-import Cardano.Node.Types (NodeMode (AlonzoNode, MockNode),
+import Cardano.Node.Client (handleNodeClientClient, runChainSyncWithCfg)
+import Cardano.Node.Types (ChainSyncHandle, NodeMode (AlonzoNode, MockNode),
                            PABServerConfig (PABServerConfig, pscBaseUrl, pscNetworkId, pscNodeMode, pscProtocolParametersJsonPath, pscSlotConfig, pscSocketPath))
 import Cardano.Protocol.Socket.Mock.Client qualified as MockClient
 import Cardano.Wallet.LocalClient qualified as LocalWalletClient
@@ -54,12 +54,13 @@ import Data.Aeson (FromJSON, ToJSON, eitherDecode)
 import Data.ByteString.Lazy qualified as BSL
 import Data.Coerce (coerce)
 import Data.Default (def)
+import Data.Pool (Pool)
+import Data.Pool qualified as Pool
 import Data.Text (Text, pack, unpack)
 import Data.Typeable (Typeable)
 import Database.Beam.Migrate.Simple (autoMigrate)
 import Database.Beam.Sqlite qualified as Sqlite
 import Database.Beam.Sqlite.Migrate qualified as Sqlite
-import Database.SQLite.Simple (open)
 import Database.SQLite.Simple qualified as Sqlite
 import Network.HTTP.Client (managerModifyRequest, newManager, setRequestIgnoreStatus)
 import Network.HTTP.Client.TLS (tlsManagerSettings)
@@ -79,12 +80,13 @@ import Plutus.PAB.Monitoring.Monitoring (convertLog, handleLogMsgTrace)
 import Plutus.PAB.Monitoring.PABLogMsg (PABLogMsg (SMultiAgent), PABMultiAgentMsg (BeamLogItem, UserLog, WalletClient),
                                         WalletClientMsg)
 import Plutus.PAB.Timeout (Timeout (Timeout))
-import Plutus.PAB.Types (Config (Config), DbConfig (DbConfig, dbConfigFile),
+import Plutus.PAB.Types (Config (Config), DbConfig (..),
                          DevelopmentOptions (DevelopmentOptions, pabResumeFrom, pabRollbackHistory),
                          PABError (BeamEffectError, ChainIndexError, NodeClientError, RemoteWalletWithMockNodeError, WalletClientError, WalletError),
                          WebserverConfig (WebserverConfig), chainIndexConfig, dbConfig, developmentOptions,
                          endpointTimeout, nodeServerConfig, pabWebserverConfig, walletServerConfig)
 import Servant.Client (ClientEnv, ClientError, mkClientEnv)
+import Wallet.API (NodeClientEffect)
 import Wallet.Effects (WalletEffect)
 import Wallet.Emulator.Wallet (Wallet)
 import Wallet.Error (WalletAPIError)
@@ -95,12 +97,12 @@ import Wallet.Types (ContractInstanceId)
 -- | Application environment with a contract type `a`.
 data AppEnv a =
     AppEnv
-        { dbConnection          :: Sqlite.Connection
+        { dbPool                :: Pool Sqlite.Connection
         , walletClientEnv       :: Maybe ClientEnv -- ^ No 'ClientEnv' when in the remote client setting.
         , nodeClientEnv         :: ClientEnv
         , chainIndexEnv         :: ClientEnv
-        , txSendHandle          :: MockClient.TxSendHandle
-        , chainSyncHandle       :: NodeClient.ChainSyncHandle
+        , txSendHandle          :: Maybe MockClient.TxSendHandle -- No 'TxSendHandle' required when connecting to the real node.
+        , chainSyncHandle       :: ChainSyncHandle
         , appConfig             :: Config
         , appTrace              :: Trace IO (PABLogMsg (Builtin a))
         , appInMemContractStore :: InMemInstances (Builtin a)
@@ -148,7 +150,7 @@ appEffectHandlers storageBackend config trace BuiltinHandler{contractHandler} =
               interpret (handleLogMsgTrace trace)
               . reinterpret (mapLog @_ @(PABLogMsg (Builtin a)) SMultiAgent)
               . interpret (Core.handleUserEnvReader @(Builtin a) @(AppEnv a))
-              . interpret (Core.handleMappedReader @(AppEnv a) dbConnection)
+              . interpret (Core.handleMappedReader @(AppEnv a) dbPool)
               . flip handleError (throwError . BeamEffectError)
               . interpret (handleBeam (convertLog (SMultiAgent . BeamLogItem) trace))
               . reinterpretN @'[_, _, _, _, _] BeamEff.handleContractStore
@@ -157,7 +159,7 @@ appEffectHandlers storageBackend config trace BuiltinHandler{contractHandler} =
             interpret (handleLogMsgTrace trace)
             . reinterpret (mapLog @_ @(PABLogMsg (Builtin a)) SMultiAgent)
             . interpret (Core.handleUserEnvReader @(Builtin a) @(AppEnv a))
-            . interpret (Core.handleMappedReader @(AppEnv a) dbConnection)
+            . interpret (Core.handleMappedReader @(AppEnv a) dbPool)
             . flip handleError (throwError . BeamEffectError)
             . interpret (handleBeam (convertLog (SMultiAgent . BeamLogItem) trace))
             . reinterpretN @'[_, _, _, _, _] handleContractDefinition
@@ -166,9 +168,9 @@ appEffectHandlers storageBackend config trace BuiltinHandler{contractHandler} =
             -- handle 'NodeClientEffect'
             flip handleError (throwError . NodeClientError)
             . interpret (Core.handleUserEnvReader @(Builtin a) @(AppEnv a))
-            . reinterpret (Core.handleMappedReader @(AppEnv a) @NodeClient.ChainSyncHandle chainSyncHandle)
+            . reinterpret (Core.handleMappedReader @(AppEnv a) @ChainSyncHandle chainSyncHandle)
             . interpret (Core.handleUserEnvReader @(Builtin a) @(AppEnv a))
-            . reinterpret (Core.handleMappedReader @(AppEnv a) @MockClient.TxSendHandle txSendHandle)
+            . reinterpret (Core.handleMappedReader @(AppEnv a) @(Maybe MockClient.TxSendHandle) txSendHandle)
             . interpret (Core.handleUserEnvReader @(Builtin a) @(AppEnv a))
             . reinterpret (Core.handleMappedReader @(AppEnv a) @ClientEnv nodeClientEnv)
             . reinterpretN @'[_, _, _, _] (handleNodeClientClient @IO $ pscSlotConfig $ nodeServerConfig config)
@@ -198,6 +200,7 @@ appEffectHandlers storageBackend config trace BuiltinHandler{contractHandler} =
 handleWalletEffect
   :: forall effs.
   ( LastMember IO effs
+  , Member NodeClientEffect effs
   , Member (Error ClientError) effs
   , Member (Error WalletAPIError) effs
   , Member (Error PABError) effs
@@ -251,17 +254,21 @@ data StorageBackend = BeamSqliteBackend | InMemoryBackend
 
 mkEnv :: Trace IO (PABLogMsg (Builtin a)) -> Config -> IO (AppEnv a)
 mkEnv appTrace appConfig@Config { dbConfig
-             , nodeServerConfig = PABServerConfig{pscBaseUrl, pscSocketPath, pscSlotConfig, pscProtocolParametersJsonPath}
+             , nodeServerConfig = PABServerConfig{pscBaseUrl, pscSocketPath, pscProtocolParametersJsonPath, pscNodeMode}
              , walletServerConfig
              , chainIndexConfig
              } = do
     walletClientEnv <- maybe (pure Nothing) (fmap Just . clientEnv) $ preview Wallet._LocalWalletConfig walletServerConfig
     nodeClientEnv <- clientEnv pscBaseUrl
     chainIndexEnv <- clientEnv (ChainIndex.ciBaseUrl chainIndexConfig)
-    dbConnection <- dbConnect appTrace dbConfig
-    txSendHandle <- liftIO $ MockClient.runTxSender pscSocketPath
+    dbPool <- dbConnect appTrace dbConfig
+    txSendHandle <-
+      case pscNodeMode of
+        AlonzoNode -> pure Nothing
+        MockNode   ->
+          liftIO $ Just <$> MockClient.runTxSender pscSocketPath
     -- This is for access to the slot number in the interpreter
-    chainSyncHandle <- Left <$> (liftIO $ MockClient.runChainSync' pscSocketPath pscSlotConfig)
+    chainSyncHandle <- runChainSyncWithCfg $ nodeServerConfig appConfig
     appInMemContractStore <- liftIO initialInMemInstances
     protocolParameters <- maybe (pure def) readPP pscProtocolParametersJsonPath
     pure AppEnv {..}
@@ -286,9 +293,9 @@ logDebugString trace = logDebug trace . SMultiAgent . UserLog
 -- | Initialize/update the database to hold our effects.
 migrate :: Trace IO (PABLogMsg (Builtin a)) -> DbConfig -> IO ()
 migrate trace config = do
-    connection <- dbConnect trace config
+    pool <- dbConnect trace config
     logDebugString trace "Running beam migration"
-    runBeamMigration trace connection
+    Pool.withResource pool (runBeamMigration trace)
 
 runBeamMigration
   :: Trace IO (PABLogMsg (Builtin a))
@@ -298,10 +305,11 @@ runBeamMigration trace conn = Sqlite.runBeamSqliteDebug (logDebugString trace . 
   autoMigrate Sqlite.migrationBackend checkedSqliteDb
 
 -- | Connect to the database.
-dbConnect :: Trace IO (PABLogMsg (Builtin a)) -> DbConfig -> IO Sqlite.Connection
-dbConnect trace DbConfig {dbConfigFile} = do
+dbConnect :: Trace IO (PABLogMsg (Builtin a)) -> DbConfig -> IO (Pool Sqlite.Connection)
+dbConnect trace DbConfig {dbConfigFile, dbConfigPoolSize} = do
+  pool <- Pool.createPool (Sqlite.open $ unpack dbConfigFile) Sqlite.close dbConfigPoolSize 5_000_000 5
   logDebugString trace $ "Connecting to DB: " <> dbConfigFile
-  open (unpack dbConfigFile)
+  return pool
 
 handleContractDefinition ::
   forall a effs. HasDefinitions a

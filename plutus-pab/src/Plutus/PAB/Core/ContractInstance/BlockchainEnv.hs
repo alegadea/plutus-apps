@@ -37,11 +37,13 @@ import Plutus.ChainIndex (BlockNumber (..), ChainIndexTx (..), ChainIndexTxOutpu
                           InsertUtxoFailed (..), InsertUtxoSuccess (..), Point (..), ReduceBlockCountResult (..),
                           RollbackFailed (..), RollbackResult (..), Tip (..), TxConfirmedState (..), TxIdState (..),
                           TxOutBalance, TxValidity (..), UtxoIndex, UtxoState (..), blockId, citxTxId, fromOnChainTx,
-                          insert, reduceBlockCount, utxoState)
+                          insert, reduceBlockCount, tipAsPoint, utxoState)
 import Plutus.ChainIndex.Compatibility (fromCardanoBlockHeader, fromCardanoPoint, toCardanoPoint)
 import Plutus.ChainIndex.TxIdState qualified as TxIdState
 import Plutus.ChainIndex.TxOutBalance qualified as TxOutBalance
+import Plutus.ChainIndex.UtxoState (viewTip)
 import Plutus.Contract.CardanoAPI (fromCardanoTx)
+import System.Random
 
 -- | Connect to the node and write node updates to the blockchain
 --   env.
@@ -55,7 +57,7 @@ startNodeClient ::
   -> InstancesState -- ^ In-memory state of running contract instances
   -> IO BlockchainEnv
 startNodeClient socket mode rollbackHistory slotConfig networkId resumePoint instancesState = do
-    env <- STM.atomically $ emptyBlockchainEnv rollbackHistory
+    env <- STM.atomically $ emptyBlockchainEnv rollbackHistory slotConfig
     case mode of
       MockNode -> do
         void $ MockClient.runChainSync socket slotConfig
@@ -63,7 +65,7 @@ startNodeClient socket mode rollbackHistory slotConfig networkId resumePoint ins
       AlonzoNode -> do
         let resumePoints = maybeToList $ toCardanoPoint resumePoint
         void $ Client.runChainSync socket nullTracer slotConfig networkId resumePoints
-          (\block -> handleSyncAction $ processChainSyncEvent env block)
+          (\block -> handleSyncAction $ processChainSyncEvent instancesState env block)
     pure env
 
 -- | Deal with sync action failures from running this STM action. For now, we
@@ -74,14 +76,9 @@ handleSyncAction action = do
   case result of
     Left err -> putStrLn $ "handleSyncAction failed with: " <> show err
     Right (Slot s, BlockNumber n) -> do
-      let recentSlot = 41511045 -- TODO: This is a relatively recent slot number
-                                -- we start logging from here to avoid spamming the terminal
-                                -- should be removed when we have better logging to report
-                                -- on the PAB sync status
-      if (n `mod` 100_000 == 0 && n > 0) || (s >= recentSlot)
-        then do
-          putStrLn $ "Current block: " <> show n <> ". Current slot: " <> show s
-        else pure ()
+      stdGen <- newStdGen
+      when (fst (randomR (0 :: Int, 10_000) stdGen) == 0) $
+        putStrLn $ "Current block: " <> show n <> ". Current slot: " <> show s
   either (error . show) (const $ pure ()) result
 
 updateInstances :: IndexedBlock -> InstanceClientEnv -> STM ()
@@ -96,8 +93,12 @@ blockAndSlot BlockchainEnv{beCurrentBlock, beCurrentSlot} =
   (,) <$> STM.readTVar beCurrentSlot <*> STM.readTVar beCurrentBlock
 
 -- | Process a chain sync event that we receive from the alonzo node client
-processChainSyncEvent :: BlockchainEnv -> ChainSyncEvent -> STM (Either SyncActionFailure (Slot, BlockNumber))
-processChainSyncEvent blockchainEnv event = do
+processChainSyncEvent
+  :: InstancesState
+  -> BlockchainEnv
+  -> ChainSyncEvent
+  -> STM (Either SyncActionFailure (Slot, BlockNumber))
+processChainSyncEvent instancesState blockchainEnv event = do
   case event of
     Resume _ -> Right <$> blockAndSlot blockchainEnv
     RollForward (BlockInMode (C.Block header transactions) era) _ ->
@@ -105,11 +106,11 @@ processChainSyncEvent blockchainEnv event = do
         -- Unfortunately, we need to pattern match again all eras because
         -- 'processBlock' has the constraints 'C.IsCardanoEra era', but not
         -- 'C.BlockInMode'.
-        C.ByronEraInCardanoMode   -> processBlock header blockchainEnv transactions era
-        C.ShelleyEraInCardanoMode -> processBlock header blockchainEnv transactions era
-        C.AllegraEraInCardanoMode -> processBlock header blockchainEnv transactions era
-        C.MaryEraInCardanoMode    -> processBlock header blockchainEnv transactions era
-        C.AlonzoEraInCardanoMode  -> processBlock header blockchainEnv transactions era
+        C.ByronEraInCardanoMode   -> processBlock instancesState header blockchainEnv transactions era
+        C.ShelleyEraInCardanoMode -> processBlock instancesState header blockchainEnv transactions era
+        C.AllegraEraInCardanoMode -> processBlock instancesState header blockchainEnv transactions era
+        C.MaryEraInCardanoMode    -> processBlock instancesState header blockchainEnv transactions era
+        C.AlonzoEraInCardanoMode  -> processBlock instancesState header blockchainEnv transactions era
     RollBackward chainPoint _ -> runRollback blockchainEnv chainPoint
 
 data SyncActionFailure
@@ -119,23 +120,30 @@ data SyncActionFailure
 
 -- | Roll back the chain to the given ChainPoint and slot.
 runRollback :: BlockchainEnv -> ChainPoint -> STM (Either SyncActionFailure (Slot, BlockNumber))
-runRollback env@BlockchainEnv{beTxChanges, beTxOutChanges} chainPoint = do
+runRollback env@BlockchainEnv{beCurrentSlot, beTxChanges, beTxOutChanges} chainPoint = do
+  currentSlot <- STM.readTVar beCurrentSlot
   txIdStateIndex <- STM.readTVar beTxChanges
   txOutBalanceStateIndex <- STM.readTVar beTxOutChanges
 
   let point = fromCardanoPoint chainPoint
       rs    = TxIdState.rollback point txIdStateIndex
       rs'   = TxOutBalance.rollback point txOutBalanceStateIndex
+      -- Check to see if the rollback is just through a sequence of empty blocks ending at the tip.
+      emptyRollBack =
+           point > tipAsPoint (viewTip txIdStateIndex)
+        && pointSlot point <= currentSlot
 
-  case rs of
-    Left e                                -> pure $ Left (RollbackFailure e)
-    Right RollbackResult{rolledBackIndex=rolledBackTxIdStateIndex} ->
-      case rs' of
-        Left e' -> pure $ Left (RollbackFailure e')
-        Right RollbackResult{rolledBackIndex=rolledBackTxOutBalanceStateIndex} -> do
-          STM.writeTVar beTxChanges rolledBackTxIdStateIndex
-          STM.writeTVar beTxOutChanges rolledBackTxOutBalanceStateIndex
-          Right <$> blockAndSlot env
+  if emptyRollBack
+    then Right <$> blockAndSlot env
+    else case rs of
+           Left e                                -> pure $ Left (RollbackFailure e)
+           Right RollbackResult{rolledBackIndex=rolledBackTxIdStateIndex} ->
+             case rs' of
+               Left e' -> pure $ Left (RollbackFailure e')
+               Right RollbackResult{rolledBackIndex=rolledBackTxOutBalanceStateIndex} -> do
+                 STM.writeTVar beTxChanges rolledBackTxIdStateIndex
+                 STM.writeTVar beTxOutChanges rolledBackTxOutBalanceStateIndex
+                 Right <$> blockAndSlot env
 
 -- | Get transaction ID and validity from a transaction.
 txEvent :: ChainIndexTx -> (TxId, TxOutBalance, TxValidity)
@@ -147,12 +155,13 @@ txEvent tx =
 -- | Update the blockchain env. with changes from a new block of cardano
 --   transactions in any era
 processBlock :: forall era. C.IsCardanoEra era
-             => C.BlockHeader
+             => InstancesState
+             -> C.BlockHeader
              -> BlockchainEnv
              -> [C.Tx era]
              -> C.EraInMode era C.CardanoMode
              -> STM (Either SyncActionFailure (Slot, BlockNumber))
-processBlock header env transactions era = do
+processBlock instancesState header env transactions era = do
   let C.BlockHeader (C.SlotNo slot) _ _ = header
   STM.writeTVar (beCurrentSlot env) (fromIntegral slot)
   if null transactions
@@ -162,6 +171,10 @@ processBlock header env transactions era = do
             -- We ignore cardano transactions that we couldn't convert to
             -- our 'ChainIndexTx'.
             ciTxs = catMaybes (either (const Nothing) Just . fromCardanoTx era <$> transactions)
+
+        instEnv <- S.instancesClientEnv instancesState
+        updateInstances (indexBlock ciTxs) instEnv
+
         updateTransactionState tip env (txEvent <$> ciTxs)
 
 -- | For the given transactions, perform the updates in the 'TxIdState', and

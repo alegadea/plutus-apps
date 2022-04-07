@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds          #-}
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleContexts   #-}
 {-# LANGUAGE FlexibleInstances  #-}
 {-# LANGUAGE GADTs              #-}
@@ -10,7 +11,10 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 module Spec.ErrorChecking where
 
+import Control.Lens hiding (elements)
 import Control.Monad
+import Control.Monad.Freer.Extras.Log
+import Data.Data
 import Data.Row
 import Test.Tasty
 
@@ -29,7 +33,7 @@ import Plutus.Trace.Emulator as Trace
 import PlutusTx qualified
 import PlutusTx.ErrorCodes
 import PlutusTx.IsData.Class
-import PlutusTx.Prelude
+import PlutusTx.Prelude hiding ((<$))
 
 import Prelude qualified as Haskell
 
@@ -48,43 +52,46 @@ tests = testGroup "error checking"
 
 -- | Normal failures should be allowed
 prop_FailFalse :: Property
-prop_FailFalse = checkErrorWhitelist defaultWhitelist (Actions [FailFalse])
+prop_FailFalse = checkErrorWhitelistWithOptions checkOptions defaultCoverageOptions defaultWhitelist (actionsFromList [FailFalse])
 
 -- | Head Nil failure should not be allowed
 prop_FailHeadNil :: Property
-prop_FailHeadNil = checkErrorWhitelist defaultWhitelist (Actions [FailHeadNil])
+prop_FailHeadNil = checkErrorWhitelistWithOptions checkOptions defaultCoverageOptions defaultWhitelist (actionsFromList [FailHeadNil])
 
 -- | Division by zero failure should not be allowed
 prop_DivZero :: Property
-prop_DivZero = checkErrorWhitelist defaultWhitelist (Actions [DivZero])
+prop_DivZero = checkErrorWhitelistWithOptions checkOptions defaultCoverageOptions defaultWhitelist (actionsFromList [DivZero])
 
 -- | Division by zero failure should not be allowed (tracing before the failure).
 prop_DivZero_t :: Property
-prop_DivZero_t = checkErrorWhitelist defaultWhitelist (Actions [DivZero_t])
+prop_DivZero_t = checkErrorWhitelistWithOptions checkOptions defaultCoverageOptions defaultWhitelist (actionsFromList [DivZero_t])
 
 -- | Successful validation should be allowed
 prop_Success :: Property
-prop_Success = checkErrorWhitelist defaultWhitelist (Actions [Success])
+prop_Success = checkErrorWhitelistWithOptions checkOptions defaultCoverageOptions defaultWhitelist (actionsFromList [Success])
+
+checkOptions :: CheckOptions
+checkOptions = set minLogLevel Critical defaultCheckOptionsContractModel
 
 -- | This QuickCheck model only provides an interface to the validators used in this
 -- test that are convenient for testing them in isolation.
-data DummyModel = DummyModel deriving Haskell.Show
+data DummyModel = DummyModel deriving (Haskell.Show, Data)
 
-deriving instance Haskell.Eq (ContractInstanceKey DummyModel w schema err)
-deriving instance Haskell.Show (ContractInstanceKey DummyModel w schema err)
+deriving instance Haskell.Eq (ContractInstanceKey DummyModel w schema err param)
+deriving instance Haskell.Show (ContractInstanceKey DummyModel w schema err param)
 
 instance ContractModel DummyModel where
-  data ContractInstanceKey DummyModel w schema err where
-    WalletKey :: Wallet -> ContractInstanceKey DummyModel () Schema ContractError
+  data ContractInstanceKey DummyModel w schema err param where
+    WalletKey :: Wallet -> ContractInstanceKey DummyModel () Schema ContractError ()
 
   data Action DummyModel = FailFalse
                          | FailHeadNil
                          | DivZero
                          | DivZero_t    -- Trace before dividing by zero
                          | Success
-                         deriving (Haskell.Eq, Haskell.Show)
+                         deriving (Haskell.Eq, Haskell.Show, Data)
 
-  perform handle _ cmd = void $ case cmd of
+  perform handle _ _ cmd = void $ case cmd of
     FailFalse -> do
       callEndpoint @"failFalse" (handle $ WalletKey w1) ()
       Trace.waitNSlots 2
@@ -103,7 +110,11 @@ instance ContractModel DummyModel where
 
   initialState = DummyModel
 
-  initialHandleSpecs = [ContractInstanceSpec (WalletKey w1) w1 contract]
+  initialInstances = [StartContract (WalletKey w1) ()]
+
+  instanceWallet (WalletKey w) = w
+
+  instanceContract _ (WalletKey _) _ = contract
 
   nextState _ = wait 2
 

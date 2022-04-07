@@ -1,6 +1,8 @@
 { system ? builtins.currentSystem
 , enableHaskellProfiling ? false
-, packages ? import ./. { inherit system enableHaskellProfiling; }
+, sourcesOverride ? { }
+, sources ? import ./nix/sources.nix { inherit system; } // sourcesOverride
+, packages ? import ./. { inherit system enableHaskellProfiling sources sourcesOverride; }
 }:
 let
   inherit (packages) pkgs plutus-apps plutus-playground pab-nami-demo docs webCommon;
@@ -11,19 +13,23 @@ let
   # This is stable as it doesn't mix dependencies with this code-base;
   # the fetched binaries are the "standard" builds that people test.
   # This should be fast as it mostly fetches Hydra caches without building much.
-  cardano-wallet = import
-    (pkgs.fetchgit {
-      url = "https://github.com/input-output-hk/cardano-wallet";
-      rev = "2fdc9a5aa44d8bc8bed0da74151ea1016fc30508";
-      sha256 = "09zz1488as64l8w6kk1ijhs4y4rsi47ashsb3gbikq3fn22mc8xb";
-    })
-    { };
+  cardano-wallet = (import sources.flake-compat {
+    inherit pkgs;
+    src = builtins.fetchTree
+      {
+        type = "github";
+        owner = "input-output-hk";
+        repo = "cardano-wallet";
+        rev = "f6d4db733c4e47ee11683c343b440552f59beff7";
+        narHash = "sha256-3oeHsrAhDSSKBSzpGIAqmOcFmBdAJ5FR02UXPLb/Yz0=";
+      };
+  }).defaultNix;
   cardano-node = import
     (pkgs.fetchgit {
       url = "https://github.com/input-output-hk/cardano-node";
       # A standard release compatible with the cardano-wallet commit above is always preferred.
-      rev = "1.33.0";
-      sha256 = "1hr00wqzmcyc3x0kp2hyw78rfmimf6z4zd4vv85b9zv3nqbjgrik";
+      rev = "1.34.1";
+      sha256 = "1hh53whcj5y9kw4qpkiza7rmkniz18r493vv4dzl1a8r5fy3b2bv";
     })
     { };
 
@@ -46,10 +52,15 @@ let
       stylish-haskell = stylish-haskell;
       nixpkgs-fmt = nixpkgs-fmt;
       shellcheck = pkgs.shellcheck;
-      purty = plutus-apps.purty-pre-commit;
     };
     hooks = {
-      purty.enable = true;
+      purs-tidy-hook = {
+        enable = true;
+        name = "purs-tidy";
+        entry = "${plutus-apps.purs-tidy}/bin/purs-tidy format-in-place";
+        files = "\\.purs$";
+        language = "system";
+      };
       stylish-haskell.enable = true;
       nixpkgs-fmt = {
         enable = true;
@@ -83,6 +94,7 @@ let
     nixFlakesAlias
     nixpkgs-fmt
     nodejs
+    plantuml
     shellcheck
     sqlite-interactive
     stack
@@ -96,10 +108,11 @@ let
     cabal-install
     cardano-node.cardano-cli
     cardano-node.cardano-node
-    cardano-wallet.cardano-wallet
+    cardano-wallet.packages.${pkgs.system}.cardano-wallet
     cardano-repo-tool
+    docs.build-and-serve-docs
     fixPngOptimization
-    fixPurty
+    fix-purs-tidy
     fixStylishHaskell
     haskell-language-server
     haskell-language-server-wrapper
@@ -112,13 +125,12 @@ let
     psa
     purescript-language-server
     purs
-    purty
+    purs-tidy
     spago
     spago2nix
     stylish-haskell
     updateMaterialized
     updateClientDeps
-    docs.build-and-serve-docs
   ]);
 
 in

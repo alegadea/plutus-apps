@@ -38,30 +38,36 @@
           (hsPkgs."plutus-chain-index-core" or (errorHandler.buildDepError "plutus-chain-index-core"))
           (hsPkgs."freer-extras" or (errorHandler.buildDepError "freer-extras"))
           (hsPkgs."aeson" or (errorHandler.buildDepError "aeson"))
+          (hsPkgs."async" or (errorHandler.buildDepError "async"))
           (hsPkgs."base" or (errorHandler.buildDepError "base"))
           (hsPkgs."beam-sqlite" or (errorHandler.buildDepError "beam-sqlite"))
           (hsPkgs."beam-migrate" or (errorHandler.buildDepError "beam-migrate"))
           (hsPkgs."cardano-api" or (errorHandler.buildDepError "cardano-api"))
-          (hsPkgs."containers" or (errorHandler.buildDepError "containers"))
           (hsPkgs."contra-tracer" or (errorHandler.buildDepError "contra-tracer"))
+          (hsPkgs."clock" or (errorHandler.buildDepError "clock"))
           (hsPkgs."data-default" or (errorHandler.buildDepError "data-default"))
           (hsPkgs."freer-simple" or (errorHandler.buildDepError "freer-simple"))
           (hsPkgs."iohk-monitoring" or (errorHandler.buildDepError "iohk-monitoring"))
           (hsPkgs."lens" or (errorHandler.buildDepError "lens"))
+          (hsPkgs."optparse-applicative" or (errorHandler.buildDepError "optparse-applicative"))
           (hsPkgs."ouroboros-network" or (errorHandler.buildDepError "ouroboros-network"))
           (hsPkgs."prettyprinter" or (errorHandler.buildDepError "prettyprinter"))
+          (hsPkgs."resource-pool" or (errorHandler.buildDepError "resource-pool"))
           (hsPkgs."sqlite-simple" or (errorHandler.buildDepError "sqlite-simple"))
           (hsPkgs."stm" or (errorHandler.buildDepError "stm"))
+          (hsPkgs."time-units" or (errorHandler.buildDepError "time-units"))
           (hsPkgs."yaml" or (errorHandler.buildDepError "yaml"))
-          (hsPkgs."optparse-applicative" or (errorHandler.buildDepError "optparse-applicative"))
           ];
         buildable = true;
         modules = [
+          "Control/Concurrent/STM/TBMQueue"
           "Plutus/ChainIndex/App"
+          "Plutus/ChainIndex/Events"
           "Plutus/ChainIndex/CommandLine"
           "Plutus/ChainIndex/Config"
           "Plutus/ChainIndex/Lib"
           "Plutus/ChainIndex/Logging"
+          "Plutus/ChainIndex/SyncStats"
           ];
         hsSourceDirs = [ "src" ];
         };

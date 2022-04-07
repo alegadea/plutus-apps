@@ -32,6 +32,23 @@
         "type": "github"
       }
     },
+    "flake-compat": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1647532380,
+        "narHash": "sha256-wswAxyO8AJTH7d5oU8VK82yBCpqwA+p6kLgpb1f1PAY=",
+        "owner": "input-output-hk",
+        "repo": "flake-compat",
+        "rev": "7da118186435255a30b5ffeabba9629c344c0bec",
+        "type": "github"
+      },
+      "original": {
+        "owner": "input-output-hk",
+        "ref": "fixes",
+        "repo": "flake-compat",
+        "type": "github"
+      }
+    },
     "flake-utils": {
       "locked": {
         "lastModified": 1620759905,
@@ -66,11 +83,11 @@
     "hackage-nix": {
       "flake": false,
       "locked": {
-        "lastModified": 1634865134,
-        "narHash": "sha256-uZHVvbx/ZIOvlpVeEvcPT+rb88tvZD+8m0zy0GsGu1c=",
+        "lastModified": 1647825459,
+        "narHash": "sha256-xW+M2/j9C29UtjkGsVgA/4vRRwVglwd5rnJc6zaB/YI=",
         "owner": "input-output-hk",
         "repo": "hackage.nix",
-        "rev": "53071c899afae0b83ed42159a48f5ea1d3f9ef6d",
+        "rev": "0b78b2adf43a0611927497a624559443d7e5a20c",
         "type": "github"
       },
       "original": {
@@ -99,11 +116,11 @@
     "haskell-nix": {
       "flake": false,
       "locked": {
-        "lastModified": 1629380841,
-        "narHash": "sha256-gWOWCfX7IgVSvMMYN6rBGK6EA0pk6pmYguXzMvGte+Q=",
+        "lastModified": 1643246195,
+        "narHash": "sha256-31lgLy3O+UM0zHzKun+Bc+PfPgJ7zcYttqwO07KjvTQ=",
         "owner": "input-output-hk",
         "repo": "haskell.nix",
-        "rev": "7215f083b37741446aa325b20c8ba9f9f76015eb",
+        "rev": "70a0d1b5425171cb99a73e106978868d2bfda309",
         "type": "github"
       },
       "original": {
@@ -164,11 +181,11 @@
     "plutus-core": {
       "flake": false,
       "locked": {
-        "lastModified": 1636924888,
-        "narHash": "sha256-80ReuqPGaZrg6GnvyaG/f2Qn6GheCK9RvYQ63+i/6Ak=",
+        "lastModified": 1646650116,
+        "narHash": "sha256-S8uvyld7ZpPsmxZlWJeRNAPd+mw3PafrtaiiuU8H3KA=",
         "owner": "input-output-hk",
         "repo": "plutus",
-        "rev": "2721c59fd2302b75c4138456c29fd5b509e8340a",
+        "rev": "4127e9cd6e889824d724c30eae55033cb50cbf3e",
         "type": "github"
       },
       "original": {
@@ -197,6 +214,7 @@
       "inputs": {
         "cardano-repo-tool": "cardano-repo-tool",
         "easy-purescript-nix": "easy-purescript-nix",
+        "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
         "gitignore-nix": "gitignore-nix",
         "hackage-nix": "hackage-nix",
@@ -248,11 +266,11 @@
     "stackage-nix": {
       "flake": false,
       "locked": {
-        "lastModified": 1597712578,
-        "narHash": "sha256-c/pcfZ6w5Yp//7oC0hErOGVVphBLc5vc4IZlWKZ/t6E=",
+        "lastModified": 1643246130,
+        "narHash": "sha256-Y8f2WPHMtj0P1ptpESaw6XjT7uIT0FXXJBb1L7qd8+Y=",
         "owner": "input-output-hk",
         "repo": "stackage.nix",
-        "rev": "e32c8b06d56954865725514ce0d98d5d1867e43a",
+        "rev": "9dc4a0b35b0fd0a120f0cfd6a2bc7318a5251ec9",
         "type": "github"
       },
       "original": {

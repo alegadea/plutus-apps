@@ -9,70 +9,8 @@
         (vardecl Collect CampaignAction) (vardecl Refund CampaignAction)
       )
     )
-    (datatypebind
-      (datatype
-        (tyvardecl Credential (type))
-
-        Credential_match
-        (vardecl PubKeyCredential (fun (con bytestring) Credential))
-        (vardecl ScriptCredential (fun (con bytestring) Credential))
-      )
-    )
-    (datatypebind
-      (datatype
-        (tyvardecl StakingCredential (type))
-
-        StakingCredential_match
-        (vardecl StakingHash (fun Credential StakingCredential))
-        (vardecl
-          StakingPtr
-          (fun
-            (con integer)
-            (fun (con integer) (fun (con integer) StakingCredential))
-          )
-        )
-      )
-    )
-    (datatypebind
-      (datatype
-        (tyvardecl DCert (type))
-
-        DCert_match
-        (vardecl DCertDelegDeRegKey (fun StakingCredential DCert))
-        (vardecl
-          DCertDelegDelegate
-          (fun StakingCredential (fun (con bytestring) DCert))
-        )
-        (vardecl DCertDelegRegKey (fun StakingCredential DCert))
-        (vardecl DCertGenesis DCert)
-        (vardecl DCertMir DCert)
-        (vardecl
-          DCertPoolRegister (fun (con bytestring) (fun (con bytestring) DCert))
-        )
-        (vardecl
-          DCertPoolRetire (fun (con bytestring) (fun (con integer) DCert))
-        )
-      )
-    )
-    (datatypebind
-      (datatype
-        (tyvardecl TxOutRef (type))
-
-        TxOutRef_match
-        (vardecl TxOutRef (fun (con bytestring) (fun (con integer) TxOutRef)))
-      )
-    )
-    (datatypebind
-      (datatype
-        (tyvardecl ScriptPurpose (type))
-
-        ScriptPurpose_match
-        (vardecl Certifying (fun DCert ScriptPurpose))
-        (vardecl Minting (fun (con bytestring) ScriptPurpose))
-        (vardecl Rewarding (fun StakingCredential ScriptPurpose))
-        (vardecl Spending (fun TxOutRef ScriptPurpose))
-      )
-    )
+    (typebind (tyvardecl ScriptPurpose (type)) (all a (type) (fun a a)))
+    (typebind (tyvardecl DCert (type)) (all a (type) (fun a a)))
     (datatypebind
       (datatype
         (tyvardecl Bool (type))
@@ -117,31 +55,12 @@
         )
       )
     )
-    (datatypebind
-      (datatype
-        (tyvardecl Maybe (fun (type) (type)))
-        (tyvardecl a (type))
-        Maybe_match
-        (vardecl Just (fun a [ Maybe a ])) (vardecl Nothing [ Maybe a ])
-      )
-    )
-    (datatypebind
-      (datatype
-        (tyvardecl Address (type))
-
-        Address_match
-        (vardecl
-          Address (fun Credential (fun [ Maybe StakingCredential ] Address))
-        )
-      )
-    )
-    (datatypebind
-      (datatype
-        (tyvardecl Tuple2 (fun (type) (fun (type) (type))))
-        (tyvardecl a (type)) (tyvardecl b (type))
-        Tuple2_match
-        (vardecl Tuple2 (fun a (fun b [ [ Tuple2 a ] b ])))
-      )
+    (typebind (tyvardecl TxInInfo (type)) (all a (type) (fun a a)))
+    (typebind (tyvardecl TxOut (type)) (all a (type) (fun a a)))
+    (typebind (tyvardecl StakingCredential (type)) (all a (type) (fun a a)))
+    (typebind
+      (tyvardecl Tuple2 (fun (type) (fun (type) (type))))
+      (lam a (type) (lam a (type) (all a (type) (fun a a))))
     )
     (let
       (rec)
@@ -156,45 +75,6 @@
       )
       (let
         (nonrec)
-        (datatypebind
-          (datatype
-            (tyvardecl TxOut (type))
-
-            TxOut_match
-            (vardecl
-              TxOut
-              (fun
-                Address
-                (fun
-                  [
-                    [
-                      (lam k (type) (lam v (type) [ List [ [ Tuple2 k ] v ] ]))
-                      (con bytestring)
-                    ]
-                    [
-                      [
-                        (lam
-                          k (type) (lam v (type) [ List [ [ Tuple2 k ] v ] ])
-                        )
-                        (con bytestring)
-                      ]
-                      (con integer)
-                    ]
-                  ]
-                  (fun [ Maybe (con bytestring) ] TxOut)
-                )
-              )
-            )
-          )
-        )
-        (datatypebind
-          (datatype
-            (tyvardecl TxInInfo (type))
-
-            TxInInfo_match
-            (vardecl TxInInfo (fun TxOutRef (fun TxOut TxInInfo)))
-          )
-        )
         (datatypebind
           (datatype
             (tyvardecl TxInfo (type))
@@ -289,11 +169,6 @@
             Ordering_match
             (vardecl EQ Ordering) (vardecl GT Ordering) (vardecl LT Ordering)
           )
-        )
-        (termbind
-          (strict)
-          (vardecl fail (fun (all a (type) a) Ordering))
-          (lam ds (all a (type) a) (error Ordering))
         )
         (datatypebind
           (datatype
@@ -396,10 +271,10 @@
                     (nonrec)
                     (termbind
                       (strict)
-                      (vardecl fail (fun (all a (type) a) Ordering))
+                      (vardecl fail (fun (con unit) Ordering))
                       (lam
                         ds
-                        (all a (type) a)
+                        (con unit)
                         {
                           [
                             [
@@ -463,21 +338,13 @@
                                                       (abs
                                                         dead
                                                         (type)
-                                                        [
-                                                          fail
-                                                          (abs
-                                                            e (type) (error e)
-                                                          )
-                                                        ]
+                                                        (error Ordering)
                                                       )
                                                     ]
                                                     (abs
                                                       dead
                                                       (type)
-                                                      [
-                                                        fail
-                                                        (abs e (type) (error e))
-                                                      ]
+                                                      (error Ordering)
                                                     )
                                                   ]
                                                   (all dead (type) dead)
@@ -485,11 +352,7 @@
                                               )
                                             )
                                           ]
-                                          (abs
-                                            dead
-                                            (type)
-                                            [ fail (abs e (type) (error e)) ]
-                                          )
+                                          (abs dead (type) (error Ordering))
                                         ]
                                         (abs dead (type) GT)
                                       ]
@@ -544,21 +407,11 @@
                                                     )
                                                   ]
                                                   (abs
-                                                    dead
-                                                    (type)
-                                                    [
-                                                      fail
-                                                      (abs e (type) (error e))
-                                                    ]
+                                                    dead (type) (error Ordering)
                                                   )
                                                 ]
                                                 (abs
-                                                  dead
-                                                  (type)
-                                                  [
-                                                    fail
-                                                    (abs e (type) (error e))
-                                                  ]
+                                                  dead (type) (error Ordering)
                                                 )
                                               ]
                                               (all dead (type) dead)
@@ -566,11 +419,7 @@
                                           )
                                         )
                                       ]
-                                      (abs
-                                        dead
-                                        (type)
-                                        [ fail (abs e (type) (error e)) ]
-                                      )
+                                      (abs dead (type) (error Ordering))
                                     ]
                                     (abs dead (type) GT)
                                   ]
@@ -586,10 +435,10 @@
                     )
                     (termbind
                       (strict)
-                      (vardecl fail (fun (all a (type) a) Ordering))
+                      (vardecl fail (fun (con unit) Ordering))
                       (lam
                         ds
-                        (all a (type) a)
+                        (con unit)
                         {
                           [
                             [
@@ -653,21 +502,13 @@
                                                       (abs
                                                         dead
                                                         (type)
-                                                        [
-                                                          fail
-                                                          (abs
-                                                            e (type) (error e)
-                                                          )
-                                                        ]
+                                                        (error Ordering)
                                                       )
                                                     ]
                                                     (abs
                                                       dead
                                                       (type)
-                                                      [
-                                                        fail
-                                                        (abs e (type) (error e))
-                                                      ]
+                                                      (error Ordering)
                                                     )
                                                   ]
                                                   (all dead (type) dead)
@@ -675,11 +516,7 @@
                                               )
                                             )
                                           ]
-                                          (abs
-                                            dead
-                                            (type)
-                                            [ fail (abs e (type) (error e)) ]
-                                          )
+                                          (abs dead (type) (error Ordering))
                                         ]
                                         (abs dead (type) GT)
                                       ]
@@ -734,21 +571,11 @@
                                                     )
                                                   ]
                                                   (abs
-                                                    dead
-                                                    (type)
-                                                    [
-                                                      fail
-                                                      (abs e (type) (error e))
-                                                    ]
+                                                    dead (type) (error Ordering)
                                                   )
                                                 ]
                                                 (abs
-                                                  dead
-                                                  (type)
-                                                  [
-                                                    fail
-                                                    (abs e (type) (error e))
-                                                  ]
+                                                  dead (type) (error Ordering)
                                                 )
                                               ]
                                               (all dead (type) dead)
@@ -756,11 +583,7 @@
                                           )
                                         )
                                       ]
-                                      (abs
-                                        dead
-                                        (type)
-                                        [ fail (abs e (type) (error e)) ]
-                                      )
+                                      (abs dead (type) (error Ordering))
                                     ]
                                     (abs dead (type) GT)
                                   ]
@@ -776,10 +599,10 @@
                     )
                     (termbind
                       (strict)
-                      (vardecl fail (fun (all a (type) a) Ordering))
+                      (vardecl fail (fun (con unit) Ordering))
                       (lam
                         ds
-                        (all a (type) a)
+                        (con unit)
                         {
                           [
                             [
@@ -843,21 +666,13 @@
                                                       (abs
                                                         dead
                                                         (type)
-                                                        [
-                                                          fail
-                                                          (abs
-                                                            e (type) (error e)
-                                                          )
-                                                        ]
+                                                        (error Ordering)
                                                       )
                                                     ]
                                                     (abs
                                                       dead
                                                       (type)
-                                                      [
-                                                        fail
-                                                        (abs e (type) (error e))
-                                                      ]
+                                                      (error Ordering)
                                                     )
                                                   ]
                                                   (all dead (type) dead)
@@ -865,11 +680,7 @@
                                               )
                                             )
                                           ]
-                                          (abs
-                                            dead
-                                            (type)
-                                            [ fail (abs e (type) (error e)) ]
-                                          )
+                                          (abs dead (type) (error Ordering))
                                         ]
                                         (abs dead (type) GT)
                                       ]
@@ -924,21 +735,11 @@
                                                     )
                                                   ]
                                                   (abs
-                                                    dead
-                                                    (type)
-                                                    [
-                                                      fail
-                                                      (abs e (type) (error e))
-                                                    ]
+                                                    dead (type) (error Ordering)
                                                   )
                                                 ]
                                                 (abs
-                                                  dead
-                                                  (type)
-                                                  [
-                                                    fail
-                                                    (abs e (type) (error e))
-                                                  ]
+                                                  dead (type) (error Ordering)
                                                 )
                                               ]
                                               (all dead (type) dead)
@@ -946,11 +747,7 @@
                                           )
                                         )
                                       ]
-                                      (abs
-                                        dead
-                                        (type)
-                                        [ fail (abs e (type) (error e)) ]
-                                      )
+                                      (abs dead (type) (error Ordering))
                                     ]
                                     (abs dead (type) GT)
                                   ]
@@ -966,10 +763,10 @@
                     )
                     (termbind
                       (strict)
-                      (vardecl fail (fun (all a (type) a) Ordering))
+                      (vardecl fail (fun (con unit) Ordering))
                       (lam
                         ds
-                        (all a (type) a)
+                        (con unit)
                         {
                           [
                             [
@@ -1033,21 +830,13 @@
                                                       (abs
                                                         dead
                                                         (type)
-                                                        [
-                                                          fail
-                                                          (abs
-                                                            e (type) (error e)
-                                                          )
-                                                        ]
+                                                        (error Ordering)
                                                       )
                                                     ]
                                                     (abs
                                                       dead
                                                       (type)
-                                                      [
-                                                        fail
-                                                        (abs e (type) (error e))
-                                                      ]
+                                                      (error Ordering)
                                                     )
                                                   ]
                                                   (all dead (type) dead)
@@ -1055,11 +844,7 @@
                                               )
                                             )
                                           ]
-                                          (abs
-                                            dead
-                                            (type)
-                                            [ fail (abs e (type) (error e)) ]
-                                          )
+                                          (abs dead (type) (error Ordering))
                                         ]
                                         (abs dead (type) GT)
                                       ]
@@ -1114,21 +899,11 @@
                                                     )
                                                   ]
                                                   (abs
-                                                    dead
-                                                    (type)
-                                                    [
-                                                      fail
-                                                      (abs e (type) (error e))
-                                                    ]
+                                                    dead (type) (error Ordering)
                                                   )
                                                 ]
                                                 (abs
-                                                  dead
-                                                  (type)
-                                                  [
-                                                    fail
-                                                    (abs e (type) (error e))
-                                                  ]
+                                                  dead (type) (error Ordering)
                                                 )
                                               ]
                                               (all dead (type) dead)
@@ -1136,11 +911,7 @@
                                           )
                                         )
                                       ]
-                                      (abs
-                                        dead
-                                        (type)
-                                        [ fail (abs e (type) (error e)) ]
-                                      )
+                                      (abs dead (type) (error Ordering))
                                     ]
                                     (abs dead (type) GT)
                                   ]
@@ -1198,22 +969,14 @@
                                                       (abs
                                                         dead
                                                         (type)
-                                                        [
-                                                          fail
-                                                          (abs
-                                                            e (type) (error e)
-                                                          )
-                                                        ]
+                                                        [ fail (con unit ()) ]
                                                       )
                                                     )
                                                   ]
                                                   (abs
                                                     dead
                                                     (type)
-                                                    [
-                                                      fail
-                                                      (abs e (type) (error e))
-                                                    ]
+                                                    [ fail (con unit ()) ]
                                                   )
                                                 ]
                                                 (abs
@@ -1244,11 +1007,7 @@
                                                               (type)
                                                               [
                                                                 fail
-                                                                (abs
-                                                                  e
-                                                                  (type)
-                                                                  (error e)
-                                                                )
+                                                                (con unit ())
                                                               ]
                                                             )
                                                           )
@@ -1256,12 +1015,7 @@
                                                         (abs
                                                           dead
                                                           (type)
-                                                          [
-                                                            fail
-                                                            (abs
-                                                              e (type) (error e)
-                                                            )
-                                                          ]
+                                                          [ fail (con unit ()) ]
                                                         )
                                                       ]
                                                       (abs dead (type) EQ)
@@ -1294,17 +1048,12 @@
                                                 (abs
                                                   dead
                                                   (type)
-                                                  [
-                                                    fail
-                                                    (abs e (type) (error e))
-                                                  ]
+                                                  [ fail (con unit ()) ]
                                                 )
                                               )
                                             ]
                                             (abs
-                                              dead
-                                              (type)
-                                              [ fail (abs e (type) (error e)) ]
+                                              dead (type) [ fail (con unit ()) ]
                                             )
                                           ]
                                           (abs
@@ -1326,22 +1075,14 @@
                                                       (abs
                                                         dead
                                                         (type)
-                                                        [
-                                                          fail
-                                                          (abs
-                                                            e (type) (error e)
-                                                          )
-                                                        ]
+                                                        [ fail (con unit ()) ]
                                                       )
                                                     )
                                                   ]
                                                   (abs
                                                     dead
                                                     (type)
-                                                    [
-                                                      fail
-                                                      (abs e (type) (error e))
-                                                    ]
+                                                    [ fail (con unit ()) ]
                                                   )
                                                 ]
                                                 (abs dead (type) EQ)
@@ -1411,17 +1152,12 @@
                                                 (abs
                                                   dead
                                                   (type)
-                                                  [
-                                                    fail
-                                                    (abs e (type) (error e))
-                                                  ]
+                                                  [ fail (con unit ()) ]
                                                 )
                                               )
                                             ]
                                             (abs
-                                              dead
-                                              (type)
-                                              [ fail (abs e (type) (error e)) ]
+                                              dead (type) [ fail (con unit ()) ]
                                             )
                                           ]
                                           (abs
@@ -1443,22 +1179,14 @@
                                                       (abs
                                                         dead
                                                         (type)
-                                                        [
-                                                          fail
-                                                          (abs
-                                                            e (type) (error e)
-                                                          )
-                                                        ]
+                                                        [ fail (con unit ()) ]
                                                       )
                                                     )
                                                   ]
                                                   (abs
                                                     dead
                                                     (type)
-                                                    [
-                                                      fail
-                                                      (abs e (type) (error e))
-                                                    ]
+                                                    [ fail (con unit ()) ]
                                                   )
                                                 ]
                                                 (abs dead (type) EQ)
@@ -1489,17 +1217,11 @@
                                           default_arg0
                                           a
                                           (abs
-                                            dead
-                                            (type)
-                                            [ fail (abs e (type) (error e)) ]
+                                            dead (type) [ fail (con unit ()) ]
                                           )
                                         )
                                       ]
-                                      (abs
-                                        dead
-                                        (type)
-                                        [ fail (abs e (type) (error e)) ]
-                                      )
+                                      (abs dead (type) [ fail (con unit ()) ])
                                     ]
                                     (abs
                                       dead
@@ -1518,17 +1240,12 @@
                                                 (abs
                                                   dead
                                                   (type)
-                                                  [
-                                                    fail
-                                                    (abs e (type) (error e))
-                                                  ]
+                                                  [ fail (con unit ()) ]
                                                 )
                                               )
                                             ]
                                             (abs
-                                              dead
-                                              (type)
-                                              [ fail (abs e (type) (error e)) ]
+                                              dead (type) [ fail (con unit ()) ]
                                             )
                                           ]
                                           (abs dead (type) EQ)
@@ -1999,6 +1716,14 @@
           )
           (let
             (nonrec)
+            (datatypebind
+              (datatype
+                (tyvardecl Maybe (fun (type) (type)))
+                (tyvardecl a (type))
+                Maybe_match
+                (vardecl Just (fun a [ Maybe a ])) (vardecl Nothing [ Maybe a ])
+              )
+            )
             (termbind
               (strict)
               (vardecl
@@ -2542,241 +2267,179 @@
                                                                                       {
                                                                                         [
                                                                                           Bool_match
-                                                                                          [
-                                                                                            [
+                                                                                          (let
+                                                                                            (nonrec)
+                                                                                            (termbind
+                                                                                              (strict)
+                                                                                              (vardecl
+                                                                                                w
+                                                                                                [
+                                                                                                  Ord
+                                                                                                  (con
+                                                                                                    integer
+                                                                                                  )
+                                                                                                ]
+                                                                                              )
+                                                                                              fOrdPOSIXTime
+                                                                                            )
+                                                                                            {
                                                                                               [
                                                                                                 [
                                                                                                   [
-                                                                                                    [
-                                                                                                      (let
-                                                                                                        (nonrec)
-                                                                                                        (termbind
-                                                                                                          (strict)
-                                                                                                          (vardecl
-                                                                                                            w
-                                                                                                            [
-                                                                                                              Ord
-                                                                                                              (con
-                                                                                                                integer
-                                                                                                              )
-                                                                                                            ]
-                                                                                                          )
-                                                                                                          fOrdPOSIXTime
-                                                                                                        )
-                                                                                                        (lam
-                                                                                                          ww
+                                                                                                    {
+                                                                                                      [
+                                                                                                        Ordering_match
+                                                                                                        [
                                                                                                           [
-                                                                                                            Extended
-                                                                                                            (con
-                                                                                                              integer
-                                                                                                            )
-                                                                                                          ]
-                                                                                                          (lam
-                                                                                                            ww
-                                                                                                            Bool
-                                                                                                            (lam
-                                                                                                              ww
-                                                                                                              [
-                                                                                                                UpperBound
+                                                                                                            [
+                                                                                                              {
+                                                                                                                hull_ccompare
                                                                                                                 (con
                                                                                                                   integer
                                                                                                                 )
-                                                                                                              ]
-                                                                                                              (lam
+                                                                                                              }
+                                                                                                              w
+                                                                                                            ]
+                                                                                                            ww
+                                                                                                          ]
+                                                                                                          ww
+                                                                                                        ]
+                                                                                                      ]
+                                                                                                      (all
+                                                                                                        dead
+                                                                                                        (type)
+                                                                                                        Bool
+                                                                                                      )
+                                                                                                    }
+                                                                                                    (abs
+                                                                                                      dead
+                                                                                                      (type)
+                                                                                                      {
+                                                                                                        [
+                                                                                                          [
+                                                                                                            {
+                                                                                                              [
+                                                                                                                Bool_match
                                                                                                                 ww
+                                                                                                              ]
+                                                                                                              (all
+                                                                                                                dead
+                                                                                                                (type)
+                                                                                                                Bool
+                                                                                                              )
+                                                                                                            }
+                                                                                                            (abs
+                                                                                                              dead
+                                                                                                              (type)
+                                                                                                              {
                                                                                                                 [
-                                                                                                                  Extended
-                                                                                                                  (con
-                                                                                                                    integer
-                                                                                                                  )
-                                                                                                                ]
-                                                                                                                (lam
-                                                                                                                  ww
-                                                                                                                  Bool
-                                                                                                                  (lam
-                                                                                                                    ww
-                                                                                                                    [
-                                                                                                                      UpperBound
-                                                                                                                      (con
-                                                                                                                        integer
-                                                                                                                      )
-                                                                                                                    ]
+                                                                                                                  [
                                                                                                                     {
                                                                                                                       [
-                                                                                                                        [
-                                                                                                                          [
-                                                                                                                            {
-                                                                                                                              [
-                                                                                                                                Ordering_match
-                                                                                                                                [
-                                                                                                                                  [
-                                                                                                                                    [
-                                                                                                                                      {
-                                                                                                                                        hull_ccompare
-                                                                                                                                        (con
-                                                                                                                                          integer
-                                                                                                                                        )
-                                                                                                                                      }
-                                                                                                                                      w
-                                                                                                                                    ]
-                                                                                                                                    ww
-                                                                                                                                  ]
-                                                                                                                                  ww
-                                                                                                                                ]
-                                                                                                                              ]
-                                                                                                                              (all
-                                                                                                                                dead
-                                                                                                                                (type)
-                                                                                                                                Bool
-                                                                                                                              )
-                                                                                                                            }
-                                                                                                                            (abs
-                                                                                                                              dead
-                                                                                                                              (type)
-                                                                                                                              {
-                                                                                                                                [
-                                                                                                                                  [
-                                                                                                                                    {
-                                                                                                                                      [
-                                                                                                                                        Bool_match
-                                                                                                                                        ww
-                                                                                                                                      ]
-                                                                                                                                      (all
-                                                                                                                                        dead
-                                                                                                                                        (type)
-                                                                                                                                        Bool
-                                                                                                                                      )
-                                                                                                                                    }
-                                                                                                                                    (abs
-                                                                                                                                      dead
-                                                                                                                                      (type)
-                                                                                                                                      {
-                                                                                                                                        [
-                                                                                                                                          [
-                                                                                                                                            {
-                                                                                                                                              [
-                                                                                                                                                Bool_match
-                                                                                                                                                ww
-                                                                                                                                              ]
-                                                                                                                                              (all
-                                                                                                                                                dead
-                                                                                                                                                (type)
-                                                                                                                                                Bool
-                                                                                                                                              )
-                                                                                                                                            }
-                                                                                                                                            (abs
-                                                                                                                                              dead
-                                                                                                                                              (type)
-                                                                                                                                              [
-                                                                                                                                                [
-                                                                                                                                                  [
-                                                                                                                                                    {
-                                                                                                                                                      fOrdUpperBound0_c
-                                                                                                                                                      (con
-                                                                                                                                                        integer
-                                                                                                                                                      )
-                                                                                                                                                    }
-                                                                                                                                                    w
-                                                                                                                                                  ]
-                                                                                                                                                  ww
-                                                                                                                                                ]
-                                                                                                                                                ww
-                                                                                                                                              ]
-                                                                                                                                            )
-                                                                                                                                          ]
-                                                                                                                                          (abs
-                                                                                                                                            dead
-                                                                                                                                            (type)
-                                                                                                                                            False
-                                                                                                                                          )
-                                                                                                                                        ]
-                                                                                                                                        (all
-                                                                                                                                          dead
-                                                                                                                                          (type)
-                                                                                                                                          dead
-                                                                                                                                        )
-                                                                                                                                      }
-                                                                                                                                    )
-                                                                                                                                  ]
-                                                                                                                                  (abs
-                                                                                                                                    dead
-                                                                                                                                    (type)
-                                                                                                                                    [
-                                                                                                                                      [
-                                                                                                                                        [
-                                                                                                                                          {
-                                                                                                                                            fOrdUpperBound0_c
-                                                                                                                                            (con
-                                                                                                                                              integer
-                                                                                                                                            )
-                                                                                                                                          }
-                                                                                                                                          w
-                                                                                                                                        ]
-                                                                                                                                        ww
-                                                                                                                                      ]
-                                                                                                                                      ww
-                                                                                                                                    ]
-                                                                                                                                  )
-                                                                                                                                ]
-                                                                                                                                (all
-                                                                                                                                  dead
-                                                                                                                                  (type)
-                                                                                                                                  dead
-                                                                                                                                )
-                                                                                                                              }
-                                                                                                                            )
-                                                                                                                          ]
-                                                                                                                          (abs
-                                                                                                                            dead
-                                                                                                                            (type)
-                                                                                                                            False
-                                                                                                                          )
-                                                                                                                        ]
-                                                                                                                        (abs
-                                                                                                                          dead
-                                                                                                                          (type)
-                                                                                                                          [
-                                                                                                                            [
-                                                                                                                              [
-                                                                                                                                {
-                                                                                                                                  fOrdUpperBound0_c
-                                                                                                                                  (con
-                                                                                                                                    integer
-                                                                                                                                  )
-                                                                                                                                }
-                                                                                                                                w
-                                                                                                                              ]
-                                                                                                                              ww
-                                                                                                                            ]
-                                                                                                                            ww
-                                                                                                                          ]
-                                                                                                                        )
+                                                                                                                        Bool_match
+                                                                                                                        ww
                                                                                                                       ]
                                                                                                                       (all
                                                                                                                         dead
                                                                                                                         (type)
-                                                                                                                        dead
+                                                                                                                        Bool
                                                                                                                       )
                                                                                                                     }
+                                                                                                                    (abs
+                                                                                                                      dead
+                                                                                                                      (type)
+                                                                                                                      [
+                                                                                                                        [
+                                                                                                                          [
+                                                                                                                            {
+                                                                                                                              fOrdUpperBound0_c
+                                                                                                                              (con
+                                                                                                                                integer
+                                                                                                                              )
+                                                                                                                            }
+                                                                                                                            w
+                                                                                                                          ]
+                                                                                                                          ww
+                                                                                                                        ]
+                                                                                                                        ww
+                                                                                                                      ]
+                                                                                                                    )
+                                                                                                                  ]
+                                                                                                                  (abs
+                                                                                                                    dead
+                                                                                                                    (type)
+                                                                                                                    False
                                                                                                                   )
+                                                                                                                ]
+                                                                                                                (all
+                                                                                                                  dead
+                                                                                                                  (type)
+                                                                                                                  dead
                                                                                                                 )
-                                                                                                              )
+                                                                                                              }
                                                                                                             )
+                                                                                                          ]
+                                                                                                          (abs
+                                                                                                            dead
+                                                                                                            (type)
+                                                                                                            [
+                                                                                                              [
+                                                                                                                [
+                                                                                                                  {
+                                                                                                                    fOrdUpperBound0_c
+                                                                                                                    (con
+                                                                                                                      integer
+                                                                                                                    )
+                                                                                                                  }
+                                                                                                                  w
+                                                                                                                ]
+                                                                                                                ww
+                                                                                                              ]
+                                                                                                              ww
+                                                                                                            ]
                                                                                                           )
+                                                                                                        ]
+                                                                                                        (all
+                                                                                                          dead
+                                                                                                          (type)
+                                                                                                          dead
                                                                                                         )
-                                                                                                      )
+                                                                                                      }
+                                                                                                    )
+                                                                                                  ]
+                                                                                                  (abs
+                                                                                                    dead
+                                                                                                    (type)
+                                                                                                    False
+                                                                                                  )
+                                                                                                ]
+                                                                                                (abs
+                                                                                                  dead
+                                                                                                  (type)
+                                                                                                  [
+                                                                                                    [
+                                                                                                      [
+                                                                                                        {
+                                                                                                          fOrdUpperBound0_c
+                                                                                                          (con
+                                                                                                            integer
+                                                                                                          )
+                                                                                                        }
+                                                                                                        w
+                                                                                                      ]
                                                                                                       ww
                                                                                                     ]
                                                                                                     ww
                                                                                                   ]
-                                                                                                  ww
-                                                                                                ]
-                                                                                                ww
+                                                                                                )
                                                                                               ]
-                                                                                              ww
-                                                                                            ]
-                                                                                            ww
-                                                                                          ]
+                                                                                              (all
+                                                                                                dead
+                                                                                                (type)
+                                                                                                dead
+                                                                                              )
+                                                                                            }
+                                                                                          )
                                                                                         ]
                                                                                         (all
                                                                                           dead

@@ -11,7 +11,7 @@
     flags = { release = false; };
     package = {
       specVersion = "1.10";
-      identifier = { name = "cardano-wallet-core"; version = "2021.12.15"; };
+      identifier = { name = "cardano-wallet-core"; version = "2022.1.18"; };
       license = "Apache-2.0";
       copyright = "2018-2020 IOHK";
       maintainer = "operations@iohk.io";
@@ -118,14 +118,14 @@
           (hsPkgs."servant" or (errorHandler.buildDepError "servant"))
           (hsPkgs."servant-client" or (errorHandler.buildDepError "servant-client"))
           (hsPkgs."servant-server" or (errorHandler.buildDepError "servant-server"))
-          (hsPkgs."shelley-spec-ledger" or (errorHandler.buildDepError "shelley-spec-ledger"))
-          (hsPkgs."shelley-spec-ledger-test" or (errorHandler.buildDepError "shelley-spec-ledger-test"))
           (hsPkgs."split" or (errorHandler.buildDepError "split"))
           (hsPkgs."splitmix" or (errorHandler.buildDepError "splitmix"))
           (hsPkgs."statistics" or (errorHandler.buildDepError "statistics"))
+          (hsPkgs."stm" or (errorHandler.buildDepError "stm"))
           (hsPkgs."streaming-commons" or (errorHandler.buildDepError "streaming-commons"))
           (hsPkgs."strict-containers" or (errorHandler.buildDepError "strict-containers"))
           (hsPkgs."strict-non-empty-containers" or (errorHandler.buildDepError "strict-non-empty-containers"))
+          (hsPkgs."strict-stm" or (errorHandler.buildDepError "strict-stm"))
           (hsPkgs."string-interpolate" or (errorHandler.buildDepError "string-interpolate"))
           (hsPkgs."template-haskell" or (errorHandler.buildDepError "template-haskell"))
           (hsPkgs."text" or (errorHandler.buildDepError "text"))
@@ -142,7 +142,6 @@
           (hsPkgs."wai" or (errorHandler.buildDepError "wai"))
           (hsPkgs."warp" or (errorHandler.buildDepError "warp"))
           (hsPkgs."warp-tls" or (errorHandler.buildDepError "warp-tls"))
-          (hsPkgs."wide-word" or (errorHandler.buildDepError "wide-word"))
           (hsPkgs."x509" or (errorHandler.buildDepError "x509"))
           (hsPkgs."x509-store" or (errorHandler.buildDepError "x509-store"))
           (hsPkgs."x509-validation" or (errorHandler.buildDepError "x509-validation"))
@@ -164,22 +163,31 @@
           "Cardano/Pool/DB/Sqlite/TH"
           "Cardano/Pool/Metadata"
           "Cardano/Wallet"
+          "Cardano/Wallet/Address/Pool"
           "Cardano/Wallet/Api"
           "Cardano/Wallet/Api/Client"
           "Cardano/Wallet/Api/Link"
           "Cardano/Wallet/Api/Server"
           "Cardano/Wallet/Api/Server/Tls"
           "Cardano/Wallet/Api/Types"
+          "Cardano/Wallet/CoinSelection"
+          "Cardano/Wallet/CoinSelection/Internal"
+          "Cardano/Wallet/CoinSelection/Internal/Balance"
+          "Cardano/Wallet/CoinSelection/Internal/Collateral"
+          "Cardano/Wallet/CoinSelection/Internal/Context"
           "Cardano/Wallet/Compat"
           "Cardano/Wallet/DB"
           "Cardano/Wallet/DB/Checkpoints"
           "Cardano/Wallet/DB/MVar"
           "Cardano/Wallet/DB/Model"
           "Cardano/Wallet/DB/Sqlite"
+          "Cardano/Wallet/DB/Sqlite/AddressBook"
           "Cardano/Wallet/DB/Sqlite/CheckpointsOld"
           "Cardano/Wallet/DB/Sqlite/Migration"
+          "Cardano/Wallet/DB/Sqlite/Stores"
           "Cardano/Wallet/DB/Sqlite/TH"
           "Cardano/Wallet/DB/Sqlite/Types"
+          "Cardano/Wallet/DB/WalletState"
           "Cardano/Wallet/Logging"
           "Cardano/Wallet/Network"
           "Cardano/Wallet/Network/Ports"
@@ -193,21 +201,19 @@
           "Cardano/Wallet/Primitive/AddressDerivation/SharedKey"
           "Cardano/Wallet/Primitive/AddressDerivation/Shelley"
           "Cardano/Wallet/Primitive/AddressDiscovery"
-          "Cardano/Wallet/Primitive/Slotting"
           "Cardano/Wallet/Primitive/AddressDiscovery/Random"
-          "Cardano/Wallet/Primitive/Delegation/State"
           "Cardano/Wallet/Primitive/AddressDiscovery/Sequential"
           "Cardano/Wallet/Primitive/AddressDiscovery/Shared"
-          "Cardano/Wallet/Primitive/SyncProgress"
-          "Cardano/Wallet/Primitive/CoinSelection"
-          "Cardano/Wallet/Primitive/CoinSelection/Balance"
-          "Cardano/Wallet/Primitive/CoinSelection/Collateral"
+          "Cardano/Wallet/Primitive/BlockSummary"
           "Cardano/Wallet/Primitive/Collateral"
+          "Cardano/Wallet/Primitive/Delegation/State"
           "Cardano/Wallet/Primitive/Delegation/UTxO"
           "Cardano/Wallet/Primitive/Migration"
           "Cardano/Wallet/Primitive/Migration/Planning"
           "Cardano/Wallet/Primitive/Migration/Selection"
           "Cardano/Wallet/Primitive/Model"
+          "Cardano/Wallet/Primitive/Slotting"
+          "Cardano/Wallet/Primitive/SyncProgress"
           "Cardano/Wallet/Primitive/Types"
           "Cardano/Wallet/Primitive/Types/Address"
           "Cardano/Wallet/Primitive/Types/Coin"
@@ -244,7 +250,8 @@
           "Network/Wai/Middleware/Logging"
           "Ouroboros/Network/Client/Wallet"
           "UnliftIO/Compat"
-          "Cardano/Wallet/Primitive/CoinSelection/Balance/Gen"
+          "Cardano/Wallet/CoinSelection/Gen"
+          "Cardano/Wallet/CoinSelection/Internal/Balance/Gen"
           "Cardano/Wallet/Primitive/Types/Address/Gen"
           "Cardano/Wallet/Primitive/Types/Coin/Gen"
           "Cardano/Wallet/Primitive/Types/RewardAccount/Gen"
@@ -292,6 +299,7 @@
             (hsPkgs."contra-tracer" or (errorHandler.buildDepError "contra-tracer"))
             (hsPkgs."cryptonite" or (errorHandler.buildDepError "cryptonite"))
             (hsPkgs."data-default" or (errorHandler.buildDepError "data-default"))
+            (hsPkgs."dbvar" or (errorHandler.buildDepError "dbvar"))
             (hsPkgs."directory" or (errorHandler.buildDepError "directory"))
             (hsPkgs."deepseq" or (errorHandler.buildDepError "deepseq"))
             (hsPkgs."extra" or (errorHandler.buildDepError "extra"))
@@ -324,10 +332,10 @@
             (hsPkgs."network-uri" or (errorHandler.buildDepError "network-uri"))
             (hsPkgs."nothunks" or (errorHandler.buildDepError "nothunks"))
             (hsPkgs."persistent" or (errorHandler.buildDepError "persistent"))
+            (hsPkgs."persistent-sqlite" or (errorHandler.buildDepError "persistent-sqlite"))
             (hsPkgs."plutus-ledger-api" or (errorHandler.buildDepError "plutus-ledger-api"))
             (hsPkgs."pretty-simple" or (errorHandler.buildDepError "pretty-simple"))
             (hsPkgs."regex-pcre-builtin" or (errorHandler.buildDepError "regex-pcre-builtin"))
-            (hsPkgs."shelley-spec-ledger" or (errorHandler.buildDepError "shelley-spec-ledger"))
             (hsPkgs."OddWord" or (errorHandler.buildDepError "OddWord"))
             (hsPkgs."ouroboros-consensus" or (errorHandler.buildDepError "ouroboros-consensus"))
             (hsPkgs."QuickCheck" or (errorHandler.buildDepError "QuickCheck"))
@@ -340,7 +348,6 @@
             (hsPkgs."scrypt" or (errorHandler.buildDepError "scrypt"))
             (hsPkgs."servant" or (errorHandler.buildDepError "servant"))
             (hsPkgs."servant-server" or (errorHandler.buildDepError "servant-server"))
-            (hsPkgs."shelley-spec-ledger-test" or (errorHandler.buildDepError "shelley-spec-ledger-test"))
             (hsPkgs."should-not-typecheck" or (errorHandler.buildDepError "should-not-typecheck"))
             (hsPkgs."splitmix" or (errorHandler.buildDepError "splitmix"))
             (hsPkgs."strict-non-empty-containers" or (errorHandler.buildDepError "strict-non-empty-containers"))
@@ -376,15 +383,21 @@
             "Cardano/Pool/DB/MVarSpec"
             "Cardano/Pool/DB/Properties"
             "Cardano/Pool/DB/SqliteSpec"
+            "Cardano/Wallet/Address/PoolSpec"
             "Cardano/Wallet/Api/Malformed"
             "Cardano/Wallet/Api/Server/TlsSpec"
             "Cardano/Wallet/Api/ServerSpec"
             "Cardano/Wallet/Api/TypesSpec"
             "Cardano/Wallet/ApiSpec"
+            "Cardano/Wallet/CoinSelectionSpec"
+            "Cardano/Wallet/CoinSelection/InternalSpec"
+            "Cardano/Wallet/CoinSelection/Internal/BalanceSpec"
+            "Cardano/Wallet/CoinSelection/Internal/CollateralSpec"
             "Cardano/Wallet/DB/Arbitrary"
             "Cardano/Wallet/DB/MVarSpec"
             "Cardano/Wallet/DB/Properties"
             "Cardano/Wallet/DB/SqliteSpec"
+            "Cardano/Wallet/DB/Sqlite/StoresSpec"
             "Cardano/Wallet/DB/Sqlite/TypesSpec"
             "Cardano/Wallet/DB/StateMachine"
             "Cardano/Wallet/DummyTarget/Primitive/Types"
@@ -399,9 +412,7 @@
             "Cardano/Wallet/Primitive/AddressDiscovery/SharedSpec"
             "Cardano/Wallet/Primitive/Delegation/StateSpec"
             "Cardano/Wallet/Primitive/AddressDiscoverySpec"
-            "Cardano/Wallet/Primitive/CoinSelectionSpec"
-            "Cardano/Wallet/Primitive/CoinSelection/BalanceSpec"
-            "Cardano/Wallet/Primitive/CoinSelection/CollateralSpec"
+            "Cardano/Wallet/Primitive/BlockSummarySpec"
             "Cardano/Wallet/Primitive/CollateralSpec"
             "Cardano/Wallet/Primitive/MigrationSpec"
             "Cardano/Wallet/Primitive/Migration/PlanningSpec"
@@ -438,7 +449,7 @@
             "Network/Wai/Middleware/LoggingSpec"
             "Spec"
             ];
-          hsSourceDirs = [ "test-common" "test/unit" ];
+          hsSourceDirs = [ "test-common" "test/unit" "test/data" ];
           mainPath = [ "core-unit-test.hs" ];
           };
         };
@@ -477,11 +488,11 @@
       };
     } // {
     src = (pkgs.lib).mkDefault (pkgs.fetchgit {
-      url = "7";
+      url = "6";
       rev = "minimal";
       sha256 = "";
       }) // {
-      url = "7";
+      url = "6";
       rev = "minimal";
       sha256 = "";
       };

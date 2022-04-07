@@ -17,7 +17,6 @@ An emulator trace is a contract trace that can be run in the Plutus emulator.
 module Plutus.Trace.Emulator(
     Emulator
     , EmulatorTrace
-    , EmulatorTraceNoStartContract
     , Wallet.Emulator.Stream.EmulatorErr(..)
     , Plutus.Trace.Emulator.Types.ContractHandle(..)
     , ContractInstanceTag
@@ -60,7 +59,6 @@ module Plutus.Trace.Emulator(
     , EmulatorConfig(..)
     , initialChainState
     , slotConfig
-    , feeConfig
     , runEmulatorStream
     , TraceConfig(..)
     , runEmulatorTrace
@@ -96,8 +94,8 @@ import Wallet.Emulator.MultiAgent (EmulatorEvent,
                                    EmulatorEvent' (InstanceEvent, SchedulerEvent, UserThreadEvent, WalletEvent),
                                    EmulatorState (_chainState, _walletStates), MultiAgentControlEffect,
                                    MultiAgentEffect, _eteEmulatorTime, _eteEvent, schedulerEvent)
-import Wallet.Emulator.Stream (EmulatorConfig (_initialChainState), EmulatorErr, _slotConfig, feeConfig,
-                               foldEmulatorStreamM, initialChainState, initialDist, runTraceStream, slotConfig)
+import Wallet.Emulator.Stream (EmulatorConfig (_initialChainState), EmulatorErr, _slotConfig, foldEmulatorStreamM,
+                               initialChainState, initialDist, runTraceStream, slotConfig)
 import Wallet.Emulator.Stream qualified
 import Wallet.Emulator.Wallet (Entity, balances)
 import Wallet.Emulator.Wallet qualified as Wallet
@@ -139,18 +137,7 @@ data PrintEffect r where
   PrintLn :: String -> PrintEffect ()
 makeEffect ''PrintEffect
 
-type EmulatorTraceNoStartContract a =
-        Eff
-            '[ RunContract
-            , Assert
-            , Waiting
-            , EmulatorControl
-            , EmulatedWalletAPI
-            , LogMsg String
-            , Error EmulatorRuntimeError
-            ] a
-
-type EmulatorTrace a =
+type EmulatorTrace =
         Eff
             '[ StartContract
             , RunContract
@@ -160,7 +147,7 @@ type EmulatorTrace a =
             , EmulatedWalletAPI
             , LogMsg String
             , Error EmulatorRuntimeError
-            ] a
+            ]
 
 handleEmulatorTrace ::
     forall effs a.

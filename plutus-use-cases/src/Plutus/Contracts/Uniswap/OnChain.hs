@@ -1,20 +1,14 @@
-{-# LANGUAGE DataKinds                  #-}
-{-# LANGUAGE DeriveAnyClass             #-}
-{-# LANGUAGE DeriveGeneric              #-}
-{-# LANGUAGE DerivingStrategies         #-}
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE LambdaCase                 #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE NoImplicitPrelude          #-}
-{-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE RecordWildCards            #-}
-{-# LANGUAGE ScopedTypeVariables        #-}
-{-# LANGUAGE TemplateHaskell            #-}
-{-# LANGUAGE TypeApplications           #-}
-{-# LANGUAGE TypeFamilies               #-}
-{-# LANGUAGE TypeOperators              #-}
+{-# LANGUAGE DataKinds             #-}
+{-# LANGUAGE DerivingStrategies    #-}
+{-# LANGUAGE FlexibleContexts      #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE NoImplicitPrelude     #-}
+{-# LANGUAGE OverloadedStrings     #-}
+{-# LANGUAGE RecordWildCards       #-}
+{-# LANGUAGE ScopedTypeVariables   #-}
+{-# LANGUAGE TypeFamilies          #-}
 {-# options_ghc -fno-specialise         #-}
+{-# OPTIONS_GHC -g -fplugin-opt PlutusTx.Plugin:coverage-all #-}
 
 module Plutus.Contracts.Uniswap.OnChain
     ( mkUniswapValidator
@@ -81,7 +75,7 @@ validateSwap LiquidityPool{..} c ctx =
         AssetClass (cs, _) = unCoin c
         minted             = txInfoMint info
       in
-        all (/= cs) $ symbols minted
+        notElem cs $ symbols minted
 
 {-# INLINABLE validateCreate #-}
 -- | Ths validates the creation of a liquidity pool to exchange coins. In order to be
@@ -103,14 +97,14 @@ validateCreate :: Uniswap
                -> Bool
 validateCreate Uniswap{..} c lps lp@LiquidityPool{..} ctx =
     traceIfFalse "Uniswap coin not present" (isUnity (valueWithin $ findOwnInput' ctx) usCoin)          && -- 1.
-    Constraints.checkOwnOutputConstraint ctx (OutputConstraint (Factory $ lp : lps) $ unitValue usCoin) && -- 2.
+    Constraints.checkOwnOutputConstraint ctx (ScriptOutputConstraint (Factory $ lp : lps) $ unitValue usCoin) && -- 2.
     (unCoin lpCoinA /= unCoin lpCoinB)                                                                  && -- 3.
-    all (/= lp) lps                                                                                     && -- 4.
+    notElem lp lps                                                                                      && -- 4.
     isUnity minted c                                                                                    && -- 5.
     (amountOf minted liquidityCoin' == liquidity)                                                       && -- 6.
     (outA > 0)                                                                                          && -- 7.
     (outB > 0)                                                                                          && -- 8.
-    Constraints.checkOwnOutputConstraint ctx (OutputConstraint (Pool lp liquidity) $                       -- 9.
+    Constraints.checkOwnOutputConstraint ctx (ScriptOutputConstraint (Pool lp liquidity) $                       -- 9.
         valueOf lpCoinA outA <> valueOf lpCoinB outB <> unitValue c)
   where
     poolOutput :: TxOut
@@ -135,7 +129,7 @@ validateCloseFactory Uniswap{..} c lps ctx =
     traceIfFalse "Uniswap coin not present" (isUnity (valueWithin $ findOwnInput' ctx) usCoin)                          && -- 1.
     traceIfFalse "wrong mint value"        (txInfoMint info == negate (unitValue c <>  valueOf lC (snd lpLiquidity))) && -- 2.
     traceIfFalse "factory output wrong"                                                                                    -- 3.
-        (Constraints.checkOwnOutputConstraint ctx $ OutputConstraint (Factory $ filter (/= fst lpLiquidity) lps) $ unitValue usCoin)
+        (Constraints.checkOwnOutputConstraint ctx $ ScriptOutputConstraint (Factory $ filter (/= fst lpLiquidity) lps) $ unitValue usCoin)
   where
     info :: TxInfo
     info = scriptContextTxInfo ctx
@@ -178,8 +172,9 @@ validateRemove c lp liquidity ctx =
     traceIfFalse "pool state coin missing"             (isUnity inVal c)                              &&
     traceIfFalse "wrong liquidity pool output"         (fst lpLiquidity == lp)                        &&
     traceIfFalse "pool state coin missing from output" (isUnity outVal c)                             &&
-    traceIfFalse "liquidity tokens not burnt"          (txInfoMint info == negate (valueOf lC diff)) &&
-    traceIfFalse "non-positive liquidity"              (outA > 0 && outB > 0)
+    traceIfFalse "liquidity tokens not burnt"          (txInfoMint info == negate (valueOf lC diff))  &&
+    traceIfFalse "non-positive liquidity"              (outA > 0 && outB > 0)                         &&
+    traceIfFalse "removal of invalid amount of tokens" (outA' == outA && outB' == outB)
   where
     info :: TxInfo
     info = scriptContextTxInfo ctx
@@ -207,6 +202,8 @@ validateRemove c lp liquidity ctx =
     diff         = liquidity - snd lpLiquidity
     inA          = amountOf inVal $ lpCoinA lp
     inB          = amountOf inVal $ lpCoinB lp
+    outA'        = amountOf outVal $ lpCoinA lp
+    outB'        = amountOf outVal $ lpCoinB lp
     (outA, outB) = calculateRemoval inA inB liquidity diff
 
 {-# INLINABLE validateAdd #-}

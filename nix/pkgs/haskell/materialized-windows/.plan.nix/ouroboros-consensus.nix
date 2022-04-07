@@ -74,6 +74,7 @@
           (hsPkgs."network-mux" or (errorHandler.buildDepError "network-mux"))
           (hsPkgs."ouroboros-network-framework" or (errorHandler.buildDepError "ouroboros-network-framework"))
           (hsPkgs."ouroboros-network" or (errorHandler.buildDepError "ouroboros-network"))
+          (hsPkgs."strict-stm" or (errorHandler.buildDepError "strict-stm"))
           ] ++ (if system.isWindows
           then [ (hsPkgs."Win32" or (errorHandler.buildDepError "Win32")) ]
           else [
@@ -185,6 +186,7 @@
           "Ouroboros/Consensus/MiniProtocol/ChainSync/Server"
           "Ouroboros/Consensus/MiniProtocol/LocalStateQuery/Server"
           "Ouroboros/Consensus/MiniProtocol/LocalTxSubmission/Server"
+          "Ouroboros/Consensus/MiniProtocol/LocalTxMonitor/Server"
           "Ouroboros/Consensus/Network/NodeToClient"
           "Ouroboros/Consensus/Network/NodeToNode"
           "Ouroboros/Consensus/Node"
@@ -279,6 +281,7 @@
           "Ouroboros/Consensus/Storage/LedgerDB/DiskPolicy"
           "Ouroboros/Consensus/Storage/LedgerDB/InMemory"
           "Ouroboros/Consensus/Storage/LedgerDB/OnDisk"
+          "Ouroboros/Consensus/Storage/LedgerDB/Types"
           "Ouroboros/Consensus/Storage/Serialisation"
           "Ouroboros/Consensus/Storage/VolatileDB"
           "Ouroboros/Consensus/Storage/VolatileDB/API"
@@ -298,11 +301,11 @@
       };
     } // {
     src = (pkgs.lib).mkDefault (pkgs.fetchgit {
-      url = "8";
+      url = "12";
       rev = "minimal";
       sha256 = "";
       }) // {
-      url = "8";
+      url = "12";
       rev = "minimal";
       sha256 = "";
       };
