@@ -107,6 +107,7 @@ library
         servant-client -any,
         servant-client-core -any,
         http-types -any,
+        http-client -any,
         text-class -any
 
 test-suite plutus-chain-index-test

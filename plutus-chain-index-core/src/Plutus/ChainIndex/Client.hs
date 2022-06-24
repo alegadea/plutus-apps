@@ -28,14 +28,20 @@ import Data.Proxy (Proxy (..))
 import Ledger (Datum, DatumHash, MintingPolicy, MintingPolicyHash, Redeemer, RedeemerHash, StakeValidator,
                StakeValidatorHash, Validator, ValidatorHash)
 import Ledger.Tx (ChainIndexTxOut, TxOutRef)
+import Network.HTTP.Client ( newManager
+                           , responseTimeoutNone
+                           , ManagerSettings(..)
+                           , defaultManagerSettings
+                           )
 import Network.HTTP.Types.Status (Status (..))
+
 import Plutus.ChainIndex.Api (API, IsUtxoResponse, TxoAtAddressRequest (TxoAtAddressRequest), TxosResponse,
                               UtxoAtAddressRequest (UtxoAtAddressRequest),
                               UtxoWithCurrencyRequest (UtxoWithCurrencyRequest), UtxosResponse)
 import Plutus.ChainIndex.Effects (ChainIndexQueryEffect (..))
 import Plutus.ChainIndex.Types (Tip)
 import Servant (NoContent, (:<|>) (..))
-import Servant.Client (ClientEnv, ClientError (..), ClientM, client, runClientM)
+import Servant.Client (ClientEnv(..), ClientError (..), ClientM, client, runClientM)
 import Servant.Client.Core.Response (ResponseF (..))
 
 healthCheck :: ClientM NoContent
@@ -55,8 +61,26 @@ getUtxoSetWithCurrency :: UtxoWithCurrencyRequest -> ClientM UtxosResponse
 getTxoSetAtAddress :: TxoAtAddressRequest -> ClientM TxosResponse
 getTip :: ClientM Tip
 
-(healthCheck, (getDatum, getValidator, getMintingPolicy, getStakeValidator, getRedeemer), getUnspentTxOut, getIsUtxo, getUtxoSetAtAddress, getUtxoSetWithCurrency, getTxoSetAtAddress, getTip, collectGarbage) =
-    (healthCheck_, (getDatum_, getValidator_, getMintingPolicy_, getStakeValidator_, getRedeemer_), getUnspentTxOut_, getIsUtxo_, getUtxoSetAtAddress_, getUtxoSetWithCurrency_, getTxoSetAtAddress_, getTip_, collectGarbage_) where
+(healthCheck
+    , (getDatum, getValidator, getMintingPolicy, getStakeValidator, getRedeemer)
+    , getUnspentTxOut
+    , getIsUtxo
+    , getUtxoSetAtAddress
+    , getUtxoSetWithCurrency
+    , getTxoSetAtAddress
+    , getTip
+    , collectGarbage
+    ) =
+    ( healthCheck_
+    , (getDatum_, getValidator_, getMintingPolicy_, getStakeValidator_, getRedeemer_)
+    , getUnspentTxOut_
+    , getIsUtxo_
+    , getUtxoSetAtAddress_
+    , getUtxoSetWithCurrency_
+    , getTxoSetAtAddress_
+    , getTip_
+    , collectGarbage_
+    ) where
         healthCheck_
             :<|> (getDatum_ :<|> getValidator_ :<|> getMintingPolicy_ :<|> getStakeValidator_ :<|> getRedeemer_)
             :<|> getUnspentTxOut_
@@ -80,8 +104,13 @@ handleChainIndexClient ::
     => ChainIndexQueryEffect
     ~> Eff effs
 handleChainIndexClient event = do
-    clientEnv <- ask
+    liftIO (putStrLn "Start handleChainIndexClient")
+    nm <- liftIO $ newManager $
+          defaultManagerSettings {managerResponseTimeout = responseTimeoutNone}
+    clientEnv' <- ask
     let
+        clientEnv = clientEnv' {manager = nm}
+
         runClient :: forall a. ClientM a -> Eff effs a
         runClient a = (sendM $ liftIO $ runClientM a clientEnv) >>= either throwError pure
         runClientMaybe :: forall a. ClientM a -> Eff effs (Maybe a)
